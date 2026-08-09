@@ -14,3 +14,18 @@ export const SessionEvent = {
 } as const;
 
 export type SessionEventName = (typeof SessionEvent)[keyof typeof SessionEvent];
+
+/** Payload for SessionEvent.QuestionStart. Sent to host and players alike —
+ * player UI just chooses not to render `question`/`choices` as text (Story 3.2). */
+export type QuestionStartPayload = {
+  questionId: string;
+  questionIndex: number;
+  type: "MULTIPLE_CHOICE" | "TRUE_FALSE" | "SHORT_ANSWER";
+  question: string;
+  choices: string[];
+  timeLimitSecs: number;
+  startedAt: number | null;
+};
+
+export type AnswerCountUpdatePayload = { answeredCount: number; playerCount: number };
+export type QuestionLockedPayload = { questionId: string };
