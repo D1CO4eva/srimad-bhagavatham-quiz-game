@@ -15,12 +15,17 @@ export async function GET(request: NextRequest) {
     return Response.json({ error: "pin and clientId are required." }, { status: 400 });
   }
 
+  // Any session for this PIN, completed or not: clients (host and players)
+  // stay mounted through the podium after the game ends and keep
+  // re-authing on Ably's normal token-refresh cycle, so this must keep
+  // succeeding rather than 404 the moment the last question locks.
   const session = await db.gameSession.findFirst({
-    where: { pin, status: { not: "COMPLETED" } },
+    where: { pin },
+    orderBy: { createdAt: "desc" },
     select: { id: true },
   });
   if (!session) {
-    return Response.json({ error: "No active session for that PIN." }, { status: 404 });
+    return Response.json({ error: "No session for that PIN." }, { status: 404 });
   }
 
   const channel = sessionChannelName(pin);

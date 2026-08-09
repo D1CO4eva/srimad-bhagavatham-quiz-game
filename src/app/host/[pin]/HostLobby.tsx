@@ -5,6 +5,9 @@ import { createSessionRealtimeClient } from "@/lib/ably-client";
 import {
   SessionEvent,
   type AnswerCountUpdatePayload,
+  type LeaderboardEntry,
+  type LeaderboardUpdatePayload,
+  type PodiumPayload,
   type QuestionStartPayload,
 } from "@/lib/events";
 import { useCountdown } from "@/lib/useCountdown";
@@ -24,6 +27,7 @@ export function HostLobby({
   initialLocked,
   initialAnsweredCount,
   initialPlayerCount,
+  initialPodium,
 }: {
   pin: string;
   quizTitle: string;
@@ -35,6 +39,7 @@ export function HostLobby({
   initialLocked: boolean;
   initialAnsweredCount: number;
   initialPlayerCount: number;
+  initialPodium: LeaderboardEntry[] | null;
 }) {
   const [players, setPlayers] = useState<Player[]>(initialPlayers);
   const [started, setStarted] = useState(initialStarted);
@@ -47,6 +52,8 @@ export function HostLobby({
   const [answeredCount, setAnsweredCount] = useState(initialAnsweredCount);
   const [playerCount, setPlayerCount] = useState(initialPlayerCount);
   const [isAdvancing, setIsAdvancing] = useState(false);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
+  const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
 
   const remaining = useCountdown(question?.startedAt ?? null, question?.timeLimitSecs ?? 0);
   const isLastQuestion = question !== null && question.questionIndex === questionCount - 1;
@@ -68,6 +75,7 @@ export function HostLobby({
       setQuestion(data);
       setLocked(false);
       setAnsweredCount(0);
+      setLeaderboard(null);
     };
     const onAnswerCountUpdate = (message: InboundMessage) => {
       const data = message.data as AnswerCountUpdatePayload;
@@ -77,17 +85,27 @@ export function HostLobby({
     const onQuestionLocked = () => {
       setLocked(true);
     };
+    const onLeaderboardUpdate = (message: InboundMessage) => {
+      setLeaderboard((message.data as LeaderboardUpdatePayload).leaderboard);
+    };
+    const onPodium = (message: InboundMessage) => {
+      setPodium((message.data as PodiumPayload).podium);
+    };
 
     channel.subscribe(SessionEvent.PlayerJoined, onPlayerJoined);
     channel.subscribe(SessionEvent.QuestionStart, onQuestionStart);
     channel.subscribe(SessionEvent.AnswerCountUpdate, onAnswerCountUpdate);
     channel.subscribe(SessionEvent.QuestionLocked, onQuestionLocked);
+    channel.subscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
+    channel.subscribe(SessionEvent.Podium, onPodium);
 
     return () => {
       channel.unsubscribe(SessionEvent.PlayerJoined, onPlayerJoined);
       channel.unsubscribe(SessionEvent.QuestionStart, onQuestionStart);
       channel.unsubscribe(SessionEvent.AnswerCountUpdate, onAnswerCountUpdate);
       channel.unsubscribe(SessionEvent.QuestionLocked, onQuestionLocked);
+      channel.unsubscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
+      channel.unsubscribe(SessionEvent.Podium, onPodium);
       client.close();
     };
   }, [pin]);
@@ -134,6 +152,27 @@ export function HostLobby({
     await fetch(`/api/sessions/${pin}/lock`, { method: "POST" }).catch(() => {});
   }
 
+  if (podium) {
+    return (
+      <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-8 px-6 text-center">
+        <h1 className="text-3xl font-semibold tracking-tight">🏆 Final Results</h1>
+        <ol className="flex w-full flex-col gap-3">
+          {podium.map((entry) => (
+            <li
+              key={entry.playerId}
+              className="flex items-center justify-between rounded-lg border border-zinc-200 px-5 py-4 dark:border-zinc-800"
+            >
+              <span className="text-lg font-medium">
+                #{entry.rank} {entry.nickname}
+              </span>
+              <span className="font-mono text-lg">{entry.points}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  }
+
   if (started && question) {
     return (
       <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center gap-6 px-6 py-16 text-center">
@@ -157,6 +196,25 @@ export function HostLobby({
           {answeredCount} / {playerCount} answered
         </p>
 
+        {locked && leaderboard && (
+          <div className="w-full max-w-sm">
+            <p className="mb-2 text-sm font-medium text-zinc-500">Leaderboard</p>
+            <ol className="flex flex-col gap-2">
+              {leaderboard.map((entry) => (
+                <li
+                  key={entry.playerId}
+                  className="flex items-center justify-between rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
+                >
+                  <span>
+                    #{entry.rank} {entry.nickname}
+                  </span>
+                  <span className="font-mono">{entry.points}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+
         {locked ? (
           <button
             type="button"
@@ -164,7 +222,7 @@ export function HostLobby({
             disabled={isAdvancing || isLastQuestion}
             className="rounded-full bg-black px-8 py-3 text-base font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-40 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
           >
-            {isLastQuestion ? "That was the last question" : isAdvancing ? "Loading..." : "Next Question"}
+            {isLastQuestion ? "Ending game..." : isAdvancing ? "Loading..." : "Next Question"}
           </button>
         ) : (
           <button

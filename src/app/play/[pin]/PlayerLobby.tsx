@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createSessionRealtimeClient } from "@/lib/ably-client";
-import { SessionEvent, type QuestionStartPayload } from "@/lib/events";
+import { SessionEvent, type LeaderboardEntry, type PodiumPayload, type QuestionStartPayload } from "@/lib/events";
 import { measureLatency } from "@/lib/latency";
 import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_SHAPES } from "@/lib/answerShapes";
@@ -15,17 +15,21 @@ export function PlayerLobby({
   playerId,
   nickname,
   initialGameStarted,
+  initialPodium,
 }: {
   pin: string;
   playerId: string;
   nickname: string;
   initialGameStarted: boolean;
+  initialPodium: LeaderboardEntry[] | null;
 }) {
   const [gameStarted, setGameStarted] = useState(initialGameStarted);
   const [question, setQuestion] = useState<QuestionStartPayload | null>(null);
   const [locked, setLocked] = useState(false);
   const [myChoice, setMyChoice] = useState<number | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [myRank, setMyRank] = useState<{ rank: number; points: number } | null>(null);
+  const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
 
   const remaining = useCountdown(question?.startedAt ?? null, question?.timeLimitSecs ?? 0);
 
@@ -38,20 +42,43 @@ export function PlayerLobby({
       setLocked(false);
       setMyChoice(null);
       setSubmitError(null);
+      setMyRank(null);
     };
     const onQuestionLocked = () => setLocked(true);
+    const onPodium = (message: InboundMessage) => {
+      setPodium((message.data as PodiumPayload).podium);
+    };
 
     channel.subscribe(SessionEvent.GameStarted, onGameStarted);
     channel.subscribe(SessionEvent.QuestionStart, onQuestionStart);
     channel.subscribe(SessionEvent.QuestionLocked, onQuestionLocked);
+    channel.subscribe(SessionEvent.Podium, onPodium);
 
     return () => {
       channel.unsubscribe(SessionEvent.GameStarted, onGameStarted);
       channel.unsubscribe(SessionEvent.QuestionStart, onQuestionStart);
       channel.unsubscribe(SessionEvent.QuestionLocked, onQuestionLocked);
+      channel.unsubscribe(SessionEvent.Podium, onPodium);
       client.close();
     };
   }, [pin, playerId]);
+
+  // Story 5.2: fetch our own rank once a question locks — a plain
+  // authenticated GET is as private as this needs to be (see the rank
+  // route's own comment for why this beats a per-player Ably channel).
+  useEffect(() => {
+    if (!locked) return;
+    let cancelled = false;
+    fetch(`/api/sessions/${pin}/rank?playerId=${playerId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && data.rank !== null) setMyRank(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [locked, pin, playerId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,14 +120,30 @@ export function PlayerLobby({
     }
   }
 
+  if (podium) {
+    const mine = podium.find((entry) => entry.playerId === playerId);
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
+        <h1 className="text-2xl font-semibold tracking-tight">🏆 Game Over</h1>
+        {mine ? (
+          <p className="text-lg text-zinc-500">
+            You placed #{mine.rank} with {mine.points} points!
+          </p>
+        ) : myRank ? (
+          <p className="text-lg text-zinc-500">
+            You placed #{myRank.rank} with {myRank.points} points.
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   if (question) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
         <p className="font-mono text-3xl font-bold">{remaining}</p>
         {myChoice !== null ? (
-          <p className="text-lg text-zinc-500">
-            {submitError ?? "Answer locked in!"}
-          </p>
+          <p className="text-lg text-zinc-500">{submitError ?? "Answer locked in!"}</p>
         ) : locked ? (
           <p className="text-lg text-zinc-500">Time&apos;s up!</p>
         ) : (
@@ -123,6 +166,11 @@ export function PlayerLobby({
             );
           })}
         </div>
+        {locked && myRank && (
+          <p className="text-zinc-500">
+            Rank #{myRank.rank} &middot; {myRank.points} points
+          </p>
+        )}
       </div>
     );
   }

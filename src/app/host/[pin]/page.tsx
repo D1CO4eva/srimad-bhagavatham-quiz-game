@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { notFound } from "next/navigation";
 import { HostLobby } from "./HostLobby";
-import type { QuestionStartPayload } from "@/lib/events";
+import type { LeaderboardEntry, QuestionStartPayload } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -11,12 +11,18 @@ export default async function HostLobbyPage({
   params: Promise<{ pin: string }>;
 }) {
   const { pin } = await params;
+  // Most recent session for this PIN — a PIN can be reused across sessions
+  // once the earlier one is COMPLETED (Story 1.3), so this is either the
+  // live session or, once the game has ended, the one to show the podium
+  // for on reload.
   const session = await db.gameSession.findFirst({
-    where: { pin, status: { not: "COMPLETED" } },
+    where: { pin },
+    orderBy: { createdAt: "desc" },
     include: {
       quiz: true,
       questions: { orderBy: { order: "asc" }, include: { _count: { select: { answers: true } } } },
       players: { orderBy: { joinedAt: "asc" } },
+      results: { orderBy: { rank: "asc" }, take: 3 },
     },
   });
 
@@ -37,6 +43,16 @@ export default async function HostLobbyPage({
       }
     : null;
 
+  const initialPodium: LeaderboardEntry[] | null =
+    session.status === "COMPLETED"
+      ? session.results.map((result) => ({
+          playerId: result.playerId,
+          nickname: result.nickname,
+          points: result.totalPoints,
+          rank: result.rank,
+        }))
+      : null;
+
   return (
     <HostLobby
       pin={session.pin}
@@ -52,6 +68,7 @@ export default async function HostLobbyPage({
       initialLocked={Boolean(current?.lockedAt)}
       initialAnsweredCount={current?._count.answers ?? 0}
       initialPlayerCount={session.players.length}
+      initialPodium={initialPodium}
     />
   );
 }
