@@ -26,8 +26,13 @@ cp .env.example .env   # already done for local docker-compose defaults
 npm install
 npm run docker:up      # starts Postgres + Redis
 npm run db:migrate
+npx tsx prisma/seed.ts # loads one sample quiz so /host has something to pick
 npm run dev
 ```
+
+No Docker? `npx prisma dev` starts a local Postgres without it — point
+`DATABASE_URL` at the connection string it prints, then run the same
+`db:migrate`/seed/`dev` steps.
 
 Other scripts:
 

@@ -1,8 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -10,4 +8,84 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  TRUE_FALSE
+  SHORT_ANSWER
+}
+
+enum GameSessionStatus {
+  LOBBY
+  ACTIVE
+  COMPLETED
+}
+
+/// A quiz authored/generated ahead of time. Editable — live sessions snapshot
+/// their own frozen copy of questions at creation time (see GameSessionQuestion).
+model Quiz {
+  id          String   @id @default(cuid())
+  title       String
+  description String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  questions    Question[]
+  gameSessions GameSession[]
+}
+
+model Question {
+  id            String       @id @default(cuid())
+  quizId        String
+  quiz          Quiz         @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  order         Int
+  type          QuestionType
+  question      String
+  /// Answer choices. Empty for SHORT_ANSWER.
+  choices       String[]
+  answer        String
+  explanation   String       @default("")
+  timeLimitSecs Int          @default(20)
+
+  @@unique([quizId, order])
+}
+
+/// A live instance of a Quiz, identified by a join PIN. Question order,
+/// choices, and timing are frozen at creation via GameSessionQuestion so
+/// editing the source Quiz mid-session never affects it (Story 1.2).
+model GameSession {
+  id        String            @id @default(cuid())
+  pin       String
+  status    GameSessionStatus @default(LOBBY)
+  quizId    String
+  quiz      Quiz              @relation(fields: [quizId], references: [id])
+  createdAt DateTime          @default(now())
+  startedAt DateTime?
+  endedAt   DateTime?
+
+  /// Index of the question currently live (-1 before the host advances past the lobby).
+  currentQuestionIndex Int @default(-1)
+
+  questions GameSessionQuestion[]
+
+  /// Only one non-completed session may hold a given PIN at a time; the app
+  /// enforces this at creation time (Postgres can't express a partial unique
+  /// constraint on status portably through Prisma's schema DSL).
+  @@index([pin])
+}
+
+model GameSessionQuestion {
+  id            String       @id @default(cuid())
+  gameSessionId String
+  gameSession   GameSession  @relation(fields: [gameSessionId], references: [id], onDelete: Cascade)
+  order         Int
+  type          QuestionType
+  question      String
+  choices       String[]
+  answer        String
+  explanation   String       @default("")
+  timeLimitSecs Int
+
+  @@unique([gameSessionId, order])
 }
