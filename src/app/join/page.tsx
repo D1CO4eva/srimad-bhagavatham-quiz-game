@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { getPlayerSession, savePlayerSession } from "@/lib/playerSession";
 
 export default function JoinPage() {
   const router = useRouter();
@@ -15,6 +16,17 @@ export default function JoinPage() {
     setIsJoining(true);
     setError(null);
     try {
+      // Already joined this PIN this session (refreshed, went back, or
+      // reconnected after a dropped connection) — reuse the existing
+      // Player record instead of creating a duplicate (Story 7.1).
+      const existing = getPlayerSession(pin);
+      if (existing) {
+        router.push(
+          `/play/${pin}?playerId=${existing.playerId}&nickname=${encodeURIComponent(existing.nickname)}`
+        );
+        return;
+      }
+
       const response = await fetch("/api/players", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -22,6 +34,7 @@ export default function JoinPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not join.");
+      savePlayerSession(pin, { playerId: data.playerId, nickname: data.nickname });
       router.push(`/play/${pin}?playerId=${data.playerId}&nickname=${encodeURIComponent(data.nickname)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not join.");

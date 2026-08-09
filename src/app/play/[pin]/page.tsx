@@ -1,7 +1,9 @@
 import { db } from "@/lib/db";
 import { notFound } from "next/navigation";
 import { PlayerLobby } from "./PlayerLobby";
-import type { LeaderboardEntry } from "@/lib/events";
+import { DynamicRejoinFromStorage as RejoinFromStorage } from "./DynamicRejoin";
+import { toPublicQuestion } from "@/lib/questions";
+import type { LeaderboardEntry, QuestionStartPayload } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -16,17 +18,7 @@ export default async function PlayPage({
   const { playerId, nickname } = await searchParams;
 
   if (!playerId || !nickname) {
-    return (
-      <div className="flex min-h-screen items-center justify-center px-6 text-center">
-        <p className="text-zinc-500">
-          Missing player info. Join again from the{" "}
-          <a href="/join" className="underline">
-            join page
-          </a>
-          .
-        </p>
-      </div>
-    );
+    return <RejoinFromStorage pin={pin} />;
   }
 
   // The player's own id already pins down which session (and its status)
@@ -35,14 +27,38 @@ export default async function PlayPage({
   const player = await db.player.findUnique({
     where: { id: playerId },
     include: {
-      gameSession: { include: { results: { orderBy: { rank: "asc" }, take: 3 } } },
+      gameSession: {
+        include: {
+          questions: { orderBy: { order: "asc" } },
+          results: { orderBy: { rank: "asc" }, take: 3 },
+        },
+      },
     },
   });
   if (!player || player.gameSession.pin !== pin) notFound();
 
+  const { gameSession } = player;
+  const current =
+    gameSession.currentQuestionIndex >= 0 ? gameSession.questions[gameSession.currentQuestionIndex] : null;
+
+  // Story 7.1: resume the live question on reconnect — don't drop the
+  // player back to "waiting" mid-question just because their connection did.
+  let initialQuestion: QuestionStartPayload | null = null;
+  let initialLocked = false;
+  let initialMyChoice: number | null = null;
+  if (gameSession.status === "ACTIVE" && current) {
+    initialQuestion = toPublicQuestion(current);
+    initialLocked = Boolean(current.lockedAt);
+    const myAnswer = await db.answer.findUnique({
+      where: { gameSessionQuestionId_playerId: { gameSessionQuestionId: current.id, playerId } },
+      select: { choiceIndex: true },
+    });
+    initialMyChoice = myAnswer?.choiceIndex ?? null;
+  }
+
   const initialPodium: LeaderboardEntry[] | null =
-    player.gameSession.status === "COMPLETED"
-      ? player.gameSession.results.map((result) => ({
+    gameSession.status === "COMPLETED"
+      ? gameSession.results.map((result) => ({
           playerId: result.playerId,
           nickname: result.nickname,
           points: result.totalPoints,
@@ -55,8 +71,11 @@ export default async function PlayPage({
       pin={pin}
       playerId={playerId}
       nickname={nickname}
-      initialGameStarted={player.gameSession.status === "ACTIVE"}
+      initialGameStarted={gameSession.status === "ACTIVE"}
       initialPodium={initialPodium}
+      initialQuestion={initialQuestion}
+      initialLocked={initialLocked}
+      initialMyChoice={initialMyChoice}
     />
   );
 }
