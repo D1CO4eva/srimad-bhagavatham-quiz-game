@@ -77,13 +77,13 @@ model GameSession {
 }
 
 model Player {
-  id            String      @id @default(cuid())
-  gameSessionId String
-  gameSession   GameSession @relation(fields: [gameSessionId], references: [id], onDelete: Cascade)
-  nickname      String
+  id                 String      @id @default(cuid())
+  gameSessionId      String
+  gameSession        GameSession @relation(fields: [gameSessionId], references: [id], onDelete: Cascade)
+  nickname           String
   /// Median ping/pong RTT in ms, used to compensate scoring for network distance (Story 2.2, 4.2).
   estimatedLatencyMs Int?
-  joinedAt      DateTime    @default(now())
+  joinedAt           DateTime    @default(now())
 
   answers Answer[]
 
@@ -110,7 +110,7 @@ model GameSessionQuestion {
   /// timer reaching zero (Story 3.5). The deadline check in answer
   /// submission (startedAt + timeLimitSecs) is the real authority (Story
   /// 3.3) — this is a UI signal, not the source of truth.
-  lockedAt DateTime?
+  lockedAt  DateTime?
 
   answers Answer[]
 
@@ -125,8 +125,16 @@ model Answer {
   player                Player              @relation(fields: [playerId], references: [id], onDelete: Cascade)
   /// Index into GameSessionQuestion.choices. Only MULTIPLE_CHOICE/TRUE_FALSE
   /// questions are answerable from the live tap UI (Story 3.2/3.4).
-  choiceIndex     Int
-  serverReceivedAt DateTime @default(now())
+  choiceIndex           Int
+  serverReceivedAt      DateTime            @default(now())
+
+  /// Graded at submission time (Story 4.1-4.3) using only server-received
+  /// timestamps; rawReactionTimeMs/trueReactionTimeMs are kept for the
+  /// formula-correctness audit (QA 9.4), not just points.
+  correct            Boolean
+  points             Int
+  rawReactionTimeMs  Int
+  trueReactionTimeMs Int
 
   @@unique([gameSessionQuestionId, playerId])
 }
