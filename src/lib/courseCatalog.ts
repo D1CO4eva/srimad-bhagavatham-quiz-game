@@ -112,11 +112,18 @@ export async function getCourseCatalog(): Promise<CourseWeek[]> {
 }
 
 export function toPublicCourseWeeks(weeks: CourseWeek[]): PublicCourseWeek[] {
-  return weeks.map((week) => ({
-    id: week.id,
-    label: WEEK_SUMMARIES[week.id] ? `${week.label} · ${WEEK_SUMMARIES[week.id]}` : week.label,
-    topics: week.topics,
-  }));
+  return weeks.map((week) => {
+    // Only offer topics that actually resolve to indexed content — the
+    // catalog's per-week topic list includes some that don't match any
+    // document's headings, which silently narrows generation down to
+    // whatever documents *do* match (or to nothing at all).
+    const topicsWithContent = new Set(week.sourceDocuments.flatMap((doc) => doc.topicsFromHeadings));
+    return {
+      id: week.id,
+      label: WEEK_SUMMARIES[week.id] ? `${week.label} · ${WEEK_SUMMARIES[week.id]}` : week.label,
+      topics: week.topics.filter((topic) => topicsWithContent.has(topic)),
+    };
+  });
 }
 
 export function resolveSourceSelection(
