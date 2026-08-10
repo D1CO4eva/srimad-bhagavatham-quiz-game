@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { createSessionRealtimeClient } from "@/lib/ably-client";
-import { SessionEvent, type LeaderboardEntry, type PodiumPayload, type QuestionStartPayload } from "@/lib/events";
+import {
+  SessionEvent,
+  type LeaderboardEntry,
+  type LeaderboardUpdatePayload,
+  type PodiumPayload,
+  type QuestionStartPayload,
+} from "@/lib/events";
 import { measureLatency } from "@/lib/latency";
 import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_SHAPES } from "@/lib/answerShapes";
@@ -10,6 +16,7 @@ import { savePlayerSession } from "@/lib/playerSession";
 import type { InboundMessage } from "ably";
 
 const LATENCY_REFRESH_MS = 45_000;
+const MEDALS = ["🥇", "🥈", "🥉"];
 
 export function PlayerLobby({
   pin,
@@ -36,6 +43,7 @@ export function PlayerLobby({
   const [myChoice, setMyChoice] = useState<number | null>(initialMyChoice);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [myRank, setMyRank] = useState<{ rank: number; points: number } | null>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
 
   const remaining = useCountdown(question?.startedAt ?? null, question?.timeLimitSecs ?? 0);
@@ -58,8 +66,12 @@ export function PlayerLobby({
       setMyChoice(null);
       setSubmitError(null);
       setMyRank(null);
+      setLeaderboard(null);
     };
     const onQuestionLocked = () => setLocked(true);
+    const onLeaderboardUpdate = (message: InboundMessage) => {
+      setLeaderboard((message.data as LeaderboardUpdatePayload).leaderboard);
+    };
     const onPodium = (message: InboundMessage) => {
       setPodium((message.data as PodiumPayload).podium);
     };
@@ -67,12 +79,14 @@ export function PlayerLobby({
     channel.subscribe(SessionEvent.GameStarted, onGameStarted);
     channel.subscribe(SessionEvent.QuestionStart, onQuestionStart);
     channel.subscribe(SessionEvent.QuestionLocked, onQuestionLocked);
+    channel.subscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
     channel.subscribe(SessionEvent.Podium, onPodium);
 
     return () => {
       channel.unsubscribe(SessionEvent.GameStarted, onGameStarted);
       channel.unsubscribe(SessionEvent.QuestionStart, onQuestionStart);
       channel.unsubscribe(SessionEvent.QuestionLocked, onQuestionLocked);
+      channel.unsubscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
       channel.unsubscribe(SessionEvent.Podium, onPodium);
       client.close();
     };
@@ -137,18 +151,20 @@ export function PlayerLobby({
 
   if (podium) {
     const mine = podium.find((entry) => entry.playerId === playerId);
+    const rank = mine?.rank ?? myRank?.rank;
+    const points = mine?.points ?? myRank?.points;
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
-        <h1 className="text-2xl font-semibold tracking-tight">🏆 Game Over</h1>
-        {mine ? (
-          <p className="text-lg text-zinc-500">
-            You placed #{mine.rank} with {mine.points} points!
-          </p>
-        ) : myRank ? (
-          <p className="text-lg text-zinc-500">
-            You placed #{myRank.rank} with {myRank.points} points.
-          </p>
-        ) : null}
+        <h1 className="text-4xl">Game Over</h1>
+        {rank !== undefined && (
+          <div className="card flex flex-col items-center gap-2 px-10 py-8">
+            <span className="text-4xl">{MEDALS[rank - 1] ?? `#${rank}`}</span>
+            <p className="font-serif text-2xl text-brand-ink">
+              You placed #{rank}
+            </p>
+            <p className="font-serif text-3xl font-bold text-brand">{points} pts</p>
+          </div>
+        )}
       </div>
     );
   }
@@ -156,13 +172,13 @@ export function PlayerLobby({
   if (question) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
-        <p className="font-mono text-3xl font-bold">{remaining}</p>
+        <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>
         {myChoice !== null ? (
-          <p className="text-lg text-zinc-500">{submitError ?? "Answer locked in!"}</p>
+          <p className="pill-badge">{submitError ?? "Answer locked in!"}</p>
         ) : locked ? (
-          <p className="text-lg text-zinc-500">Time&apos;s up!</p>
+          <p className="pill-badge">Time&apos;s up!</p>
         ) : (
-          <p className="text-lg text-zinc-500">Tap your answer</p>
+          <p className="pill-badge">Tap your answer</p>
         )}
         <div className="grid w-full max-w-sm grid-cols-2 gap-4">
           {question.choices.map((_, index) => {
@@ -174,16 +190,37 @@ export function PlayerLobby({
                 type="button"
                 disabled={disabled}
                 onClick={() => handleAnswer(index)}
-                className="aspect-square rounded-xl text-white transition-opacity disabled:opacity-40"
+                className="aspect-square rounded-2xl text-white shadow-lg transition-opacity disabled:opacity-40"
                 style={{ backgroundColor: shape.color }}
                 aria-label={shape.label}
               />
             );
           })}
         </div>
-        {locked && myRank && (
-          <p className="text-zinc-500">
-            Rank #{myRank.rank} &middot; {myRank.points} points
+        {locked && leaderboard && (
+          <div className="w-full max-w-sm">
+            <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Top 5</p>
+            <ol className="flex flex-col gap-2">
+              {leaderboard.map((entry) => (
+                <li
+                  key={entry.playerId}
+                  className={`card flex items-center justify-between gap-3 px-5 py-3 ${
+                    entry.playerId === playerId ? "ring-2 ring-brand" : ""
+                  }`}
+                >
+                  <span className="flex items-center gap-3 font-medium text-brand-ink">
+                    <span className="w-6 text-lg">{MEDALS[entry.rank - 1] ?? `#${entry.rank}`}</span>
+                    {entry.nickname}
+                  </span>
+                  <span className="font-serif text-lg font-bold text-brand">{entry.points}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+        {locked && myRank && !leaderboard?.some((entry) => entry.playerId === playerId) && (
+          <p className="pill-badge">
+            Your rank: #{myRank.rank} &middot; {myRank.points} points
           </p>
         )}
       </div>
@@ -192,16 +229,16 @@ export function PlayerLobby({
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
-      <p className="text-lg font-medium">Hi, {nickname}!</p>
+      <p className="font-serif text-2xl text-brand-ink">Hi, {nickname}!</p>
       {gameStarted ? (
-        <p className="text-zinc-500">Game in progress — waiting for the next question...</p>
+        <p className="text-ink-soft">Game in progress — waiting for the next question…</p>
       ) : (
         <>
           <div
-            className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-300 border-t-black dark:border-zinc-700 dark:border-t-white"
+            className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-brand"
             aria-hidden
           />
-          <p className="text-zinc-500">Waiting for the host to start the game...</p>
+          <p className="text-ink-soft">Waiting for the host to start the game…</p>
         </>
       )}
     </div>

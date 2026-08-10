@@ -29,16 +29,11 @@ export function StartGameButton({ quizId }: { quizId: string }) {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={isStarting}
-        className="rounded-full bg-black px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-      >
-        {isStarting ? "Starting..." : "Start Live Game"}
+    <div className="flex flex-shrink-0 flex-col items-end gap-1">
+      <button type="button" onClick={handleClick} disabled={isStarting} className="btn btn-primary">
+        {isStarting ? "Starting…" : "Start Live Game"}
       </button>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   );
 }

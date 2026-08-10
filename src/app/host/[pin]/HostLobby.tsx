@@ -16,6 +16,8 @@ import type { InboundMessage } from "ably";
 
 type Player = { id: string; nickname: string };
 
+const MEDALS = ["🥇", "🥈", "🥉"];
+
 export function HostLobby({
   pin,
   quizTitle,
@@ -155,17 +157,16 @@ export function HostLobby({
   if (podium) {
     return (
       <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-8 px-6 text-center">
-        <h1 className="text-3xl font-semibold tracking-tight">🏆 Final Results</h1>
+        <span className="pill-badge">{quizTitle}</span>
+        <h1 className="text-5xl">Final Results</h1>
         <ol className="flex w-full flex-col gap-3">
           {podium.map((entry) => (
-            <li
-              key={entry.playerId}
-              className="flex items-center justify-between rounded-lg border border-zinc-200 px-5 py-4 dark:border-zinc-800"
-            >
-              <span className="text-lg font-medium">
-                #{entry.rank} {entry.nickname}
+            <li key={entry.playerId} className="card flex items-center justify-between gap-4 px-6 py-5">
+              <span className="flex items-center gap-3 font-serif text-xl text-brand-ink">
+                <span className="text-2xl">{MEDALS[entry.rank - 1] ?? `#${entry.rank}`}</span>
+                {entry.nickname}
               </span>
-              <span className="font-mono text-lg">{entry.points}</span>
+              <span className="font-serif text-2xl font-bold text-brand">{entry.points}</span>
             </li>
           ))}
         </ol>
@@ -176,39 +177,37 @@ export function HostLobby({
   if (started && question) {
     return (
       <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center gap-6 px-6 py-16 text-center">
-        <p className="text-sm text-zinc-500">
+        <span className="pill-badge">
           Question {question.questionIndex + 1} of {questionCount}
-        </p>
-        <h1 className="text-3xl font-semibold tracking-tight">{question.question}</h1>
-        <p className="font-mono text-5xl font-bold">{remaining}</p>
+        </span>
+        <h1 className="max-w-2xl text-4xl">{question.question}</h1>
+        <p className="font-serif text-6xl font-bold text-brand">{remaining}</p>
         <ul className="grid w-full grid-cols-2 gap-3">
           {question.choices.map((choice, index) => (
             <li
               key={index}
-              className="rounded-lg px-4 py-3 text-left font-medium text-white"
+              className="rounded-2xl px-5 py-4 text-left font-semibold text-white shadow-lg"
               style={{ backgroundColor: ANSWER_SHAPES[index % ANSWER_SHAPES.length].color }}
             >
               {choice}
             </li>
           ))}
         </ul>
-        <p className="text-lg text-zinc-500">
+        <p className="pill-badge">
           {answeredCount} / {playerCount} answered
         </p>
 
         {locked && leaderboard && (
           <div className="w-full max-w-sm">
-            <p className="mb-2 text-sm font-medium text-zinc-500">Leaderboard</p>
+            <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Top 5</p>
             <ol className="flex flex-col gap-2">
               {leaderboard.map((entry) => (
-                <li
-                  key={entry.playerId}
-                  className="flex items-center justify-between rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
-                >
-                  <span>
-                    #{entry.rank} {entry.nickname}
+                <li key={entry.playerId} className="card flex items-center justify-between gap-3 px-5 py-3">
+                  <span className="flex items-center gap-3 font-medium text-brand-ink">
+                    <span className="w-6 text-lg">{MEDALS[entry.rank - 1] ?? `#${entry.rank}`}</span>
+                    {entry.nickname}
                   </span>
-                  <span className="font-mono">{entry.points}</span>
+                  <span className="font-serif text-lg font-bold text-brand">{entry.points}</span>
                 </li>
               ))}
             </ol>
@@ -216,24 +215,15 @@ export function HostLobby({
         )}
 
         {locked ? (
-          <button
-            type="button"
-            onClick={handleNext}
-            disabled={isAdvancing || isLastQuestion}
-            className="rounded-full bg-black px-8 py-3 text-base font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-40 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-          >
-            {isLastQuestion ? "Ending game..." : isAdvancing ? "Loading..." : "Next Question"}
+          <button type="button" onClick={handleNext} disabled={isAdvancing || isLastQuestion} className="btn btn-primary">
+            {isLastQuestion ? "Ending game…" : isAdvancing ? "Loading…" : "Next Question"}
           </button>
         ) : (
-          <button
-            type="button"
-            onClick={handleLock}
-            className="rounded-full border border-zinc-300 px-8 py-3 text-base font-medium transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-          >
+          <button type="button" onClick={handleLock} className="btn btn-secondary">
             Lock Now
           </button>
         )}
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
       </div>
     );
   }
@@ -241,42 +231,29 @@ export function HostLobby({
   return (
     <div className="mx-auto flex min-h-screen max-w-2xl flex-col items-center gap-8 px-6 py-16 text-center">
       <div>
-        <p className="text-sm uppercase tracking-widest text-zinc-500">{quizTitle}</p>
-        <p className="mt-2 text-sm text-zinc-500">Join at {joinUrl}</p>
+        <span className="pill-badge">{quizTitle}</span>
+        <p className="mt-3 text-sm text-ink-soft">Join at {joinUrl}</p>
       </div>
-      <p className="font-mono text-8xl font-bold tracking-widest">{pin}</p>
+      <p className="font-serif text-8xl font-bold tracking-widest text-brand">{pin}</p>
 
       {started ? (
-        <button
-          type="button"
-          onClick={handleNext}
-          disabled={isAdvancing}
-          className="rounded-full bg-black px-8 py-3 text-base font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-40 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-        >
-          {isAdvancing ? "Loading..." : "Next Question"}
+        <button type="button" onClick={handleNext} disabled={isAdvancing} className="btn btn-primary">
+          {isAdvancing ? "Loading…" : "Next Question"}
         </button>
       ) : (
-        <button
-          type="button"
-          onClick={handleStart}
-          disabled={players.length === 0 || isStarting}
-          className="rounded-full bg-black px-8 py-3 text-base font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-40 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-        >
-          {isStarting ? "Starting..." : "Start Game"}
+        <button type="button" onClick={handleStart} disabled={players.length === 0 || isStarting} className="btn btn-primary">
+          {isStarting ? "Starting…" : "Start Game"}
         </button>
       )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
       <div className="w-full">
-        <p className="mb-3 text-sm font-medium text-zinc-500">
+        <p className="mb-3 text-sm font-bold tracking-wide text-ink-soft uppercase">
           {players.length} player{players.length === 1 ? "" : "s"} joined
         </p>
         <ul className="flex flex-wrap justify-center gap-2">
           {players.map((player) => (
-            <li
-              key={player.id}
-              className="rounded-full border border-zinc-200 px-3 py-1 text-sm dark:border-zinc-800"
-            >
+            <li key={player.id} className="pill-badge">
               {player.nickname}
             </li>
           ))}

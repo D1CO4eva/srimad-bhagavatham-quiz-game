@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { publishToSession } from "@/lib/ably";
 import { SessionEvent } from "@/lib/events";
 
-const TOP_N = 10;
+const TOP_N = 5;
 const PODIUM_SIZE = 3;
 
 /** Cumulative score across the whole session, per Story 5.1's leaderboard reads. */
