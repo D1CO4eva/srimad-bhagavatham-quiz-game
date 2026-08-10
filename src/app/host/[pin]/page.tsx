@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { notFound } from "next/navigation";
 import { HostLobby } from "./HostLobby";
+import type { QuestionStartPayload } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +15,27 @@ export default async function HostLobbyPage({
     where: { pin, status: { not: "COMPLETED" } },
     include: {
       quiz: true,
-      questions: true,
+      questions: { orderBy: { order: "asc" }, include: { _count: { select: { answers: true } } } },
       players: { orderBy: { joinedAt: "asc" } },
     },
   });
 
   if (!session) notFound();
+
+  const current =
+    session.currentQuestionIndex >= 0 ? session.questions[session.currentQuestionIndex] : null;
+
+  const initialQuestion: QuestionStartPayload | null = current
+    ? {
+        questionId: current.id,
+        questionIndex: current.order,
+        type: current.type,
+        question: current.question,
+        choices: current.choices,
+        timeLimitSecs: current.timeLimitSecs,
+        startedAt: current.startedAt?.getTime() ?? null,
+      }
+    : null;
 
   return (
     <HostLobby
@@ -31,6 +47,11 @@ export default async function HostLobbyPage({
         nickname: player.nickname,
       }))}
       joinUrl={`${process.env.NEXT_PUBLIC_APP_URL ?? ""}/join`}
+      initialStarted={session.status === "ACTIVE"}
+      initialQuestion={initialQuestion}
+      initialLocked={Boolean(current?.lockedAt)}
+      initialAnsweredCount={current?._count.answers ?? 0}
+      initialPlayerCount={session.players.length}
     />
   );
 }

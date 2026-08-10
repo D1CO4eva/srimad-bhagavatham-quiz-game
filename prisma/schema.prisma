@@ -85,6 +85,8 @@ model Player {
   estimatedLatencyMs Int?
   joinedAt      DateTime    @default(now())
 
+  answers Answer[]
+
   @@unique([gameSessionId, nickname])
   @@index([gameSessionId])
 }
@@ -101,5 +103,30 @@ model GameSessionQuestion {
   explanation   String       @default("")
   timeLimitSecs Int
 
+  /// Set when the host advances to this question (Story 3.1); the countdown
+  /// and the server's answer deadline are both computed from this.
+  startedAt DateTime?
+  /// Set when the question is locked, either by "Lock Now" or by the host's
+  /// timer reaching zero (Story 3.5). The deadline check in answer
+  /// submission (startedAt + timeLimitSecs) is the real authority (Story
+  /// 3.3) — this is a UI signal, not the source of truth.
+  lockedAt DateTime?
+
+  answers Answer[]
+
   @@unique([gameSessionId, order])
+}
+
+model Answer {
+  id                    String              @id @default(cuid())
+  gameSessionQuestionId String
+  gameSessionQuestion   GameSessionQuestion @relation(fields: [gameSessionQuestionId], references: [id], onDelete: Cascade)
+  playerId              String
+  player                Player              @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  /// Index into GameSessionQuestion.choices. Only MULTIPLE_CHOICE/TRUE_FALSE
+  /// questions are answerable from the live tap UI (Story 3.2/3.4).
+  choiceIndex     Int
+  serverReceivedAt DateTime @default(now())
+
+  @@unique([gameSessionQuestionId, playerId])
 }
