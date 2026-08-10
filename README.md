@@ -80,3 +80,11 @@ uncaught errors with a stack trace instead of the app just going blank.
 
 Not built: an admin view of active sessions (Story 8.3) — explicitly a cut
 candidate in the dev plan, cut here too given the time budget.
+
+## QA (Feature 9 — the long pole)
+
+- `docs/qa-checklist.md` — what's verified vs. what still needs a human
+  (real devices, real remote testers, a real deployment)
+- `docs/formula-audit.md` — the scoring formula's correctness verification
+- `load-test/` — k6 scripts simulating the plan's worst case (500-1000
+  players joining, then all answering within the last 1-2 seconds)
