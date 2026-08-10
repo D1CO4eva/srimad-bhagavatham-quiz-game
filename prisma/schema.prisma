@@ -22,14 +22,22 @@ enum GameSessionStatus {
   COMPLETED
 }
 
+enum QuizStatus {
+  DRAFT
+  PUBLISHED
+}
+
 /// A quiz authored/generated ahead of time. Editable — live sessions snapshot
 /// their own frozen copy of questions at creation time (see GameSessionQuestion).
 model Quiz {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   title       String
-  description String   @default("")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  description String     @default("")
+  /// Generated quizzes start as DRAFT so the host can preview/rename before
+  /// they're startable; only PUBLISHED quizzes appear as launchable on /host.
+  status      QuizStatus @default(DRAFT)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
   questions    Question[]
   gameSessions GameSession[]

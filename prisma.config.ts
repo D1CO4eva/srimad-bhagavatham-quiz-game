@@ -11,5 +11,9 @@ export default defineConfig({
   },
   datasource: {
     url: process.env["DATABASE_URL"],
+    // Optional: only needed if the Postgres server's `template1` isn't pristine
+    // (e.g. it doubles as the app's own database), which would otherwise leak
+    // existing objects into Prisma's auto-created shadow database.
+    shadowDatabaseUrl: process.env["SHADOW_DATABASE_URL"],
   },
 });
