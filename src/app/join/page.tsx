@@ -43,16 +43,19 @@ export default function JoinPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Join a game</h1>
-      <form onSubmit={handleSubmit} className="flex w-full max-w-xs flex-col gap-4">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-8 px-6 text-center">
+      <div>
+        <span className="pill-badge">Join</span>
+        <h1 className="mt-3 text-4xl">Enter the game</h1>
+      </div>
+      <form onSubmit={handleSubmit} className="card flex w-full max-w-xs flex-col gap-4 p-7">
         <input
           value={pin}
           onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
           placeholder="Game PIN"
           inputMode="numeric"
           maxLength={6}
-          className="rounded-lg border border-zinc-300 px-4 py-3 text-center text-2xl tracking-widest dark:border-zinc-700 dark:bg-zinc-900"
+          className="input-field text-center font-serif text-2xl tracking-widest text-brand-ink"
           required
         />
         <input
@@ -60,17 +63,13 @@ export default function JoinPage() {
           onChange={(event) => setNickname(event.target.value)}
           placeholder="Nickname"
           maxLength={30}
-          className="rounded-lg border border-zinc-300 px-4 py-3 text-center text-lg dark:border-zinc-700 dark:bg-zinc-900"
+          className="input-field text-center text-lg"
           required
         />
-        <button
-          type="submit"
-          disabled={isJoining}
-          className="rounded-full bg-black px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-        >
-          {isJoining ? "Joining..." : "Join"}
+        <button type="submit" disabled={isJoining} className="btn btn-primary w-full">
+          {isJoining ? "Joining…" : "Join"}
         </button>
-        {error && <p className="text-center text-sm text-red-600">{error}</p>}
+        {error && <p className="text-center text-sm text-danger">{error}</p>}
       </form>
     </div>
   );

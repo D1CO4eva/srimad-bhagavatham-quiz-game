@@ -27,9 +27,9 @@ export function RejoinFromStorage({ pin }: { pin: string }) {
 
   return (
     <div className="flex min-h-screen items-center justify-center px-6 text-center">
-      <p className="text-zinc-500">
+      <p className="text-ink-soft">
         Missing player info. Join again from the{" "}
-        <a href="/join" className="underline">
+        <a href="/join" className="font-semibold text-brand underline">
           join page
         </a>
         .
