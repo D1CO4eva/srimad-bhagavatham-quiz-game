@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { publishToSession } from "@/lib/ably";
 import { SessionEvent } from "@/lib/events";
 import { computePoints, computeRawReactionTimeMs, computeTrueReactionTimeMs } from "@/lib/scoring";
-import { addPoints } from "@/lib/leaderboard";
+import { addPoints, finalizeSession, publishLeaderboardUpdate } from "@/lib/leaderboard";
 
 export class QuestionFlowError extends Error {
   constructor(message: string) {
@@ -71,6 +71,10 @@ export async function advanceToNextQuestion(pin: string) {
  * submitAnswer is the real authority regardless of whether this ever runs
  * (Story 3.3) — this just gives clients a clean "time's up" signal, whether
  * triggered by the host's Lock Now button or their countdown hitting zero.
+ *
+ * Once locked, this is also the session's "grading window closed" moment
+ * (Story 5.1): the leaderboard broadcasts here, and if this was the last
+ * question, the session is finalized straight into the podium (Story 5.3).
  */
 export async function lockCurrentQuestion(pin: string) {
   const session = await db.gameSession.findFirst({
@@ -87,6 +91,12 @@ export async function lockCurrentQuestion(pin: string) {
     });
   }
   await publishToSession(pin, SessionEvent.QuestionLocked, { questionId: current.id });
+  await publishLeaderboardUpdate(pin);
+
+  const isLastQuestion = current.order === session.questions.length - 1;
+  if (isLastQuestion) {
+    await finalizeSession(pin);
+  }
 }
 
 export class AnswerRejectedError extends Error {

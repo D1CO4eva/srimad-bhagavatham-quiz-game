@@ -69,6 +69,7 @@ model GameSession {
 
   questions GameSessionQuestion[]
   players   Player[]
+  results   SessionResult[]
 
   /// Only one non-completed session may hold a given PIN at a time; the app
   /// enforces this at creation time (Postgres can't express a partial unique
@@ -86,6 +87,7 @@ model Player {
   joinedAt           DateTime    @default(now())
 
   answers Answer[]
+  results SessionResult[]
 
   @@unique([gameSessionId, nickname])
   @@index([gameSessionId])
@@ -137,4 +139,22 @@ model Answer {
   trueReactionTimeMs Int
 
   @@unique([gameSessionQuestionId, playerId])
+}
+
+/// Final standings, written once when the last question's leaderboard phase
+/// closes (Story 5.3). Snapshotted from Redis so post-game standings survive
+/// even after the session's Redis leaderboard eventually expires.
+model SessionResult {
+  id            String      @id @default(cuid())
+  gameSessionId String
+  gameSession   GameSession @relation(fields: [gameSessionId], references: [id], onDelete: Cascade)
+  playerId      String
+  player        Player      @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  nickname      String
+  rank          Int
+  totalPoints   Int
+  createdAt     DateTime    @default(now())
+
+  @@unique([gameSessionId, playerId])
+  @@index([gameSessionId])
 }

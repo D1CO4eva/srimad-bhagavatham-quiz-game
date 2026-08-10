@@ -29,3 +29,7 @@ export type QuestionStartPayload = {
 
 export type AnswerCountUpdatePayload = { answeredCount: number; playerCount: number };
 export type QuestionLockedPayload = { questionId: string };
+
+export type LeaderboardEntry = { playerId: string; nickname: string; points: number; rank: number };
+export type LeaderboardUpdatePayload = { leaderboard: LeaderboardEntry[] };
+export type PodiumPayload = { podium: LeaderboardEntry[] };
