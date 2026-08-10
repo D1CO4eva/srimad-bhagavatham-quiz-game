@@ -1,6 +1,8 @@
 import { db } from "@/lib/db";
 import { publishToSession } from "@/lib/ably";
 import { SessionEvent } from "@/lib/events";
+import { computePoints, computeRawReactionTimeMs, computeTrueReactionTimeMs } from "@/lib/scoring";
+import { addPoints } from "@/lib/leaderboard";
 
 export class QuestionFlowError extends Error {
   constructor(message: string) {
@@ -95,10 +97,12 @@ export class AnswerRejectedError extends Error {
 }
 
 /**
- * Records a player's answer for the session's current question. Rejects
- * anything after the server-computed deadline regardless of client state
- * (Story 3.3), and rejects a second submission for the same question
- * (Story 3.4 / QA 9.1 rapid-double-submit case).
+ * Records and grades a player's answer for the session's current question.
+ * Rejects anything after the server-computed deadline regardless of client
+ * state (Story 3.3), and rejects a second submission for the same question
+ * (Story 3.4 / QA 9.1 rapid-double-submit case). Grading uses only
+ * server-received timestamps (Story 4.1) — nothing client-submitted about
+ * timing is ever trusted.
  */
 export async function submitAnswer(pin: string, playerId: string, questionId: string, choiceIndex: number) {
   const session = await db.gameSession.findFirst({
@@ -113,20 +117,50 @@ export async function submitAnswer(pin: string, playerId: string, questionId: st
     throw new AnswerRejectedError("That question hasn't started yet.");
   }
   const deadline = current.startedAt.getTime() + current.timeLimitSecs * 1000;
-  if (current.lockedAt || Date.now() > deadline) {
+  const serverReceivedAt = new Date();
+  if (current.lockedAt || serverReceivedAt.getTime() > deadline) {
     throw new AnswerRejectedError("The question is locked.");
   }
   if (choiceIndex < 0 || choiceIndex >= current.choices.length) {
     throw new AnswerRejectedError("choiceIndex is out of range.");
   }
 
+  const player = await db.player.findUnique({
+    where: { id: playerId },
+    select: { gameSessionId: true, estimatedLatencyMs: true },
+  });
+  if (!player || player.gameSessionId !== session.id) {
+    throw new AnswerRejectedError("Player does not belong to this session.");
+  }
+
+  const timeLimitMs = current.timeLimitSecs * 1000;
+  const rawReactionTimeMs = computeRawReactionTimeMs(serverReceivedAt.getTime(), current.startedAt.getTime());
+  const trueReactionTimeMs = computeTrueReactionTimeMs(
+    rawReactionTimeMs,
+    player.estimatedLatencyMs ?? 0,
+    timeLimitMs
+  );
+  const correct = current.choices[choiceIndex] === current.answer;
+  const points = computePoints(correct, trueReactionTimeMs, timeLimitMs);
+
   try {
     await db.answer.create({
-      data: { gameSessionQuestionId: current.id, playerId, choiceIndex },
+      data: {
+        gameSessionQuestionId: current.id,
+        playerId,
+        choiceIndex,
+        serverReceivedAt,
+        correct,
+        points,
+        rawReactionTimeMs,
+        trueReactionTimeMs,
+      },
     });
   } catch {
     throw new AnswerRejectedError("You already answered this question.");
   }
+
+  await addPoints(pin, playerId, points);
 
   const answeredCount = await db.answer.count({ where: { gameSessionQuestionId: current.id } });
   const playerCount = await db.player.count({ where: { gameSessionId: session.id } });
