@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { publishToSession } from "@/lib/ably";
-import { SessionEvent } from "@/lib/events";
+import { SessionEvent, type QuestionStartPayload } from "@/lib/events";
 import { computePoints, computeRawReactionTimeMs, computeTrueReactionTimeMs } from "@/lib/scoring";
 import { addPoints, finalizeSession, publishLeaderboardUpdate } from "@/lib/leaderboard";
 
@@ -12,15 +12,15 @@ export class QuestionFlowError extends Error {
 }
 
 /** Public shape sent to clients — never includes `answer`/`explanation` (Story 3.2/3.4 integrity). */
-function toPublicQuestion(question: {
+export function toPublicQuestion(question: {
   id: string;
   order: number;
-  type: string;
+  type: QuestionStartPayload["type"];
   question: string;
   choices: string[];
   timeLimitSecs: number;
   startedAt: Date | null;
-}) {
+}): QuestionStartPayload {
   return {
     questionId: question.id,
     questionIndex: question.order,

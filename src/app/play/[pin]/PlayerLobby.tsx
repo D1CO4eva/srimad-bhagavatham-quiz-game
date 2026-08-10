@@ -6,6 +6,7 @@ import { SessionEvent, type LeaderboardEntry, type PodiumPayload, type QuestionS
 import { measureLatency } from "@/lib/latency";
 import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_SHAPES } from "@/lib/answerShapes";
+import { savePlayerSession } from "@/lib/playerSession";
 import type { InboundMessage } from "ably";
 
 const LATENCY_REFRESH_MS = 45_000;
@@ -16,22 +17,36 @@ export function PlayerLobby({
   nickname,
   initialGameStarted,
   initialPodium,
+  initialQuestion,
+  initialLocked,
+  initialMyChoice,
 }: {
   pin: string;
   playerId: string;
   nickname: string;
   initialGameStarted: boolean;
   initialPodium: LeaderboardEntry[] | null;
+  initialQuestion: QuestionStartPayload | null;
+  initialLocked: boolean;
+  initialMyChoice: number | null;
 }) {
   const [gameStarted, setGameStarted] = useState(initialGameStarted);
-  const [question, setQuestion] = useState<QuestionStartPayload | null>(null);
-  const [locked, setLocked] = useState(false);
-  const [myChoice, setMyChoice] = useState<number | null>(null);
+  const [question, setQuestion] = useState<QuestionStartPayload | null>(initialQuestion);
+  const [locked, setLocked] = useState(initialLocked);
+  const [myChoice, setMyChoice] = useState<number | null>(initialMyChoice);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [myRank, setMyRank] = useState<{ rank: number; points: number } | null>(null);
   const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
 
   const remaining = useCountdown(question?.startedAt ?? null, question?.timeLimitSecs ?? 0);
+
+  // Keep sessionStorage in sync even when this page was reached directly
+  // (a shared link, a bookmark) rather than through /join, so a later
+  // refresh or re-visit to /join for this PIN still re-associates instead
+  // of creating a duplicate Player (Story 7.1).
+  useEffect(() => {
+    savePlayerSession(pin, { playerId, nickname });
+  }, [pin, playerId, nickname]);
 
   useEffect(() => {
     const client = createSessionRealtimeClient(pin, playerId);
