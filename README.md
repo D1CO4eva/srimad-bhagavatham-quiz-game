@@ -46,10 +46,13 @@ npm run docker:down
 
 ## Quiz content
 
-Quiz generation itself (RAG over Bhagavatam course-note markdowns) lives in
-the separate `GOD-Auth-Service` repo (`POST /api/quiz/generate`). This app
-owns its own `Quiz`/`Question` tables — a generated quiz is imported/saved
-here before it can be turned into a live session.
+The host generates quizzes from `/host` by picking a class week (or several)
+and topic(s) — RAG retrieval over Bhagavatam course-note markdowns happens in
+the separate `GOD-Auth-Service` repo (`POST /api/quiz/generate`), scoped to
+the selected week/topic via a static catalog (`COURSE_CATALOG_URL`). This app
+owns its own `Quiz`/`Question` tables — a generated quiz is saved as a draft,
+previewed, and Published before it can be turned into a live session.
+`/host` itself sits behind a shared passcode (`HOST_PASSCODE`).
 
 ## Deployment
 
@@ -59,14 +62,26 @@ never share credentials.
 1. **Postgres**: any hosted Postgres works (Neon, Supabase, Vercel Postgres,
    etc.). Run `npx prisma migrate deploy` against it once before first
    traffic — this applies existing migration files, it does not generate
-   new ones (that only happens locally, via `prisma migrate dev`).
+   new ones (that only happens locally, via `prisma migrate dev`). Prefer a
+   pooled/PgBouncer-style connection string if the host offers one — Vercel's
+   serverless functions each open their own connection, and Feature 9's
+   load-testing notes already flagged connection exhaustion as a real risk
+   worth re-checking against the actual prod database.
 2. **Redis**: any hosted Redis works (Upstash's free tier is enough for a
    single-class event). Set `REDIS_URL`.
 3. **Ably**: a **separate, real** API key from the dev one — set
    `ABLY_API_KEY`.
 4. **`NEXT_PUBLIC_APP_URL`**: the real prod domain (used to build the
    join-link shown on the host screen).
-5. Deploy the Next.js app itself anywhere that supports it (Vercel is the
+5. **`HOST_PASSCODE`**: a real passcode only hosts should know — do not reuse
+   any value from a local `.env`.
+6. **`SESSION_SECRET`**: signs the host's session cookie. Generate a fresh
+   one for prod (`openssl rand -base64 32`) — do not reuse the local dev
+   value.
+7. **`QUIZ_GENERATOR_API_URL`** / **`COURSE_CATALOG_URL`**: the defaults in
+   `.env.example` point at GOD-Auth-Service's public deployment and its
+   course catalog — only override if pointing at a different one.
+8. Deploy the Next.js app itself anywhere that supports it (Vercel is the
    path of least resistance for this stack — git push, no server to manage).
    HTTPS/WSS is automatic on Vercel and most other platforms; Ably's client
    SDK always negotiates a secure connection on its own regardless.

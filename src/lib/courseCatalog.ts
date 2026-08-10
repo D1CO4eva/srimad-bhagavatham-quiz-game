@@ -29,6 +29,20 @@ export type PublicCourseWeek = {
   topics: string[];
 };
 
+/**
+ * The catalog only labels weeks "Week N" — not enough for a host picking a
+ * week to know what's actually in it. Derived from each week's own topic
+ * list (see COURSE_CATALOG_URL); not sourced from the catalog itself, so
+ * these need a human check if a future course revision changes topics.
+ */
+const WEEK_SUMMARIES: Record<string, string> = {
+  "week-1": "Sanatana Dharma Overview",
+  "week-2": "Prasthana Traya",
+  "week-3": "Bhagavatam Mahatmyam",
+  "week-4": "Structure & Lineage",
+  "week-5": "Canto 1 Overview",
+};
+
 export type SourceGroup = {
   id: string;
   label: string;
@@ -98,7 +112,11 @@ export async function getCourseCatalog(): Promise<CourseWeek[]> {
 }
 
 export function toPublicCourseWeeks(weeks: CourseWeek[]): PublicCourseWeek[] {
-  return weeks.map((week) => ({ id: week.id, label: week.label, topics: week.topics }));
+  return weeks.map((week) => ({
+    id: week.id,
+    label: WEEK_SUMMARIES[week.id] ? `${week.label} · ${WEEK_SUMMARIES[week.id]}` : week.label,
+    topics: week.topics,
+  }));
 }
 
 export function resolveSourceSelection(

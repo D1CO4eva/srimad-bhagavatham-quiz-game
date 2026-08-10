@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Cormorant_Garamond, Source_Sans_3 } from "next/font/google";
+import Image from "next/image";
 import "./globals.css";
 
 const cormorant = Cormorant_Garamond({
@@ -22,7 +23,17 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${cormorant.variable} ${sourceSans.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <Image
+          src="/god-logo.jpg"
+          alt="Global Organization for Divinity"
+          width={1024}
+          height={617}
+          priority
+          className="fixed right-4 top-4 z-50 h-10 w-auto rounded-md shadow-md sm:h-12"
+        />
+        {children}
+      </body>
     </html>
   );
 }

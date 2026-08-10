@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.env
+.env.local
+*.md
+docs
+load-test
+prisma/migrations/**/*.md
+.claude
