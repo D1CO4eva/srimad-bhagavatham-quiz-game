@@ -68,11 +68,25 @@ model GameSession {
   currentQuestionIndex Int @default(-1)
 
   questions GameSessionQuestion[]
+  players   Player[]
 
   /// Only one non-completed session may hold a given PIN at a time; the app
   /// enforces this at creation time (Postgres can't express a partial unique
   /// constraint on status portably through Prisma's schema DSL).
   @@index([pin])
+}
+
+model Player {
+  id            String      @id @default(cuid())
+  gameSessionId String
+  gameSession   GameSession @relation(fields: [gameSessionId], references: [id], onDelete: Cascade)
+  nickname      String
+  /// Median ping/pong RTT in ms, used to compensate scoring for network distance (Story 2.2, 4.2).
+  estimatedLatencyMs Int?
+  joinedAt      DateTime    @default(now())
+
+  @@unique([gameSessionId, nickname])
+  @@index([gameSessionId])
 }
 
 model GameSessionQuestion {
