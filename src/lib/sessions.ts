@@ -3,6 +3,7 @@ import { generateUniquePin } from "@/lib/pin";
 import { publishToSession } from "@/lib/ably";
 import { SessionEvent } from "@/lib/events";
 import { toPublicQuestion } from "@/lib/questions";
+import { finalizeSession } from "@/lib/leaderboard";
 
 export class QuizNotFoundError extends Error {
   constructor(quizId: string) {
@@ -15,6 +16,13 @@ export class SessionNotStartableError extends Error {
   constructor(pin: string) {
     super(`Session ${pin} cannot be started (not in lobby, or no players joined).`);
     this.name = "SessionNotStartableError";
+  }
+}
+
+export class SessionNotFoundError extends Error {
+  constructor(pin: string) {
+    super(`No session found for PIN ${pin}.`);
+    this.name = "SessionNotFoundError";
   }
 }
 
@@ -93,4 +101,18 @@ export async function startGameSession(pin: string) {
   const payload = toPublicQuestion({ ...firstQuestion, startedAt });
   await publishToSession(pin, SessionEvent.QuestionStart, payload);
   return payload;
+}
+
+/**
+ * Lets the host end a session early from anywhere in the host flow — before
+ * it's started, mid-question, or between questions. Reuses the same
+ * finalize path a natural last-question lock takes, so players still get a
+ * normal podium/"Game Over" screen instead of being left stuck waiting.
+ * A no-op if the session already ended.
+ */
+export async function endGameSession(pin: string) {
+  const session = await db.gameSession.findFirst({ where: { pin }, select: { status: true } });
+  if (!session) throw new SessionNotFoundError(pin);
+  if (session.status === "COMPLETED") return;
+  await finalizeSession(pin);
 }
