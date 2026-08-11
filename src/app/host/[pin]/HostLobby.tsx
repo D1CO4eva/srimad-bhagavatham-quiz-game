@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createSessionRealtimeClient } from "@/lib/ably-client";
 import {
   SessionEvent,
@@ -8,6 +9,7 @@ import {
   type LeaderboardEntry,
   type LeaderboardUpdatePayload,
   type PodiumPayload,
+  type QuestionLockedPayload,
   type QuestionStartPayload,
 } from "@/lib/events";
 import { useCountdown } from "@/lib/useCountdown";
@@ -43,6 +45,7 @@ export function HostLobby({
   initialPlayerCount: number;
   initialPodium: LeaderboardEntry[] | null;
 }) {
+  const router = useRouter();
   const [players, setPlayers] = useState<Player[]>(initialPlayers);
   const [started, setStarted] = useState(initialStarted);
   const [isStarting, setIsStarting] = useState(false);
@@ -51,13 +54,27 @@ export function HostLobby({
 
   const [question, setQuestion] = useState<QuestionStartPayload | null>(initialQuestion);
   const [locked, setLocked] = useState(initialLocked);
+  const [revealedAnswer, setRevealedAnswer] = useState<string | null>(null);
   const [answeredCount, setAnsweredCount] = useState(initialAnsweredCount);
   const [playerCount, setPlayerCount] = useState(initialPlayerCount);
   const [isAdvancing, setIsAdvancing] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
+  const [isEnding, setIsEnding] = useState(false);
 
-  const remaining = useCountdown(question?.startedAt ?? null, question?.timeLimitSecs ?? 0);
+  const liveRemaining = useCountdown(question?.startedAt ?? null, question?.timeLimitSecs ?? 0);
+  // Frozen the instant the question locks (captured in the onQuestionLocked
+  // handler below), so the displayed number stops instead of continuing to
+  // tick down off the wall clock after answering has closed.
+  const [frozenRemaining, setFrozenRemaining] = useState<number | null>(null);
+  // Kept in sync via effect (not read during render) so the lock handler
+  // below can read the latest value without a stale closure.
+  const liveRemainingRef = useRef(liveRemaining);
+  useEffect(() => {
+    liveRemainingRef.current = liveRemaining;
+  }, [liveRemaining]);
+
+  const remaining = locked ? (frozenRemaining ?? liveRemaining) : liveRemaining;
   const isLastQuestion = question !== null && question.questionIndex === questionCount - 1;
 
   useEffect(() => {
@@ -76,6 +93,8 @@ export function HostLobby({
       const data = message.data as QuestionStartPayload;
       setQuestion(data);
       setLocked(false);
+      setRevealedAnswer(null);
+      setFrozenRemaining(null);
       setAnsweredCount(0);
       setLeaderboard(null);
     };
@@ -84,8 +103,11 @@ export function HostLobby({
       setAnsweredCount(data.answeredCount);
       setPlayerCount(data.playerCount);
     };
-    const onQuestionLocked = () => {
+    const onQuestionLocked = (message: InboundMessage) => {
+      const data = message.data as QuestionLockedPayload;
       setLocked(true);
+      setFrozenRemaining(liveRemainingRef.current);
+      setRevealedAnswer(data.answer);
     };
     const onLeaderboardUpdate = (message: InboundMessage) => {
       setLeaderboard((message.data as LeaderboardUpdatePayload).leaderboard);
@@ -154,6 +176,35 @@ export function HostLobby({
     await fetch(`/api/sessions/${pin}/lock`, { method: "POST" }).catch(() => {});
   }
 
+  async function handleEndGame() {
+    if (!window.confirm("End this game for everyone and go back to drafts?")) return;
+    setIsEnding(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/sessions/${pin}/end`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not end the game.");
+      router.push("/host");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not end the game.");
+      setIsEnding(false);
+    }
+  }
+
+  // Available on every host screen — pin-sharing, mid-question, and podium —
+  // so the host is never stuck without a way back to /host. A normal
+  // in-flow button at the bottom, not fixed, so it never overlaps content.
+  const endGameButton = (
+    <button
+      type="button"
+      onClick={handleEndGame}
+      disabled={isEnding}
+      className="btn btn-secondary text-danger"
+    >
+      {isEnding ? "Ending…" : "End Game"}
+    </button>
+  );
+
   if (podium) {
     return (
       <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-8 px-6 text-center">
@@ -170,6 +221,8 @@ export function HostLobby({
             </li>
           ))}
         </ol>
+        {error && <p className="text-sm text-danger">{error}</p>}
+        {endGameButton}
       </div>
     );
   }
@@ -183,15 +236,22 @@ export function HostLobby({
         <h1 className="max-w-2xl text-4xl">{question.question}</h1>
         <p className="font-serif text-6xl font-bold text-brand">{remaining}</p>
         <ul className="grid w-full grid-cols-2 gap-3">
-          {question.choices.map((choice, index) => (
-            <li
-              key={index}
-              className="rounded-2xl px-5 py-4 text-left font-semibold text-white shadow-lg"
-              style={{ backgroundColor: ANSWER_SHAPES[index % ANSWER_SHAPES.length].color }}
-            >
-              {choice}
-            </li>
-          ))}
+          {question.choices.map((choice, index) => {
+            const isCorrect = revealedAnswer !== null && choice === revealedAnswer;
+            const isRevealed = revealedAnswer !== null;
+            return (
+              <li
+                key={index}
+                className={`rounded-2xl px-5 py-4 text-left font-semibold text-white shadow-lg transition-all duration-500 ${
+                  isRevealed && !isCorrect ? "opacity-30" : ""
+                } ${isCorrect ? "ring-4 ring-success" : ""}`}
+                style={{ backgroundColor: ANSWER_SHAPES[index % ANSWER_SHAPES.length].color }}
+              >
+                {choice}
+                {isCorrect && <span className="ml-2">✓</span>}
+              </li>
+            );
+          })}
         </ul>
         <p className="pill-badge">
           {answeredCount} / {playerCount} answered
@@ -224,6 +284,7 @@ export function HostLobby({
           </button>
         )}
         {error && <p className="text-sm text-danger">{error}</p>}
+        {endGameButton}
       </div>
     );
   }
@@ -259,6 +320,8 @@ export function HostLobby({
           ))}
         </ul>
       </div>
+
+      {endGameButton}
     </div>
   );
 }

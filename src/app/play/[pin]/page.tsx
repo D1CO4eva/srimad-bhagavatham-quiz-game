@@ -46,9 +46,11 @@ export default async function PlayPage({
   let initialQuestion: QuestionStartPayload | null = null;
   let initialLocked = false;
   let initialMyChoice: number | null = null;
+  let initialRevealedAnswer: string | null = null;
   if (gameSession.status === "ACTIVE" && current) {
     initialQuestion = toPublicQuestion(current);
     initialLocked = Boolean(current.lockedAt);
+    initialRevealedAnswer = initialLocked ? current.answer : null;
     const myAnswer = await db.answer.findUnique({
       where: { gameSessionQuestionId_playerId: { gameSessionQuestionId: current.id, playerId } },
       select: { choiceIndex: true },
@@ -76,6 +78,7 @@ export default async function PlayPage({
       initialQuestion={initialQuestion}
       initialLocked={initialLocked}
       initialMyChoice={initialMyChoice}
+      initialRevealedAnswer={initialRevealedAnswer}
     />
   );
 }

@@ -90,7 +90,7 @@ export async function lockCurrentQuestion(pin: string) {
       data: { lockedAt: new Date() },
     });
   }
-  await publishToSession(pin, SessionEvent.QuestionLocked, { questionId: current.id });
+  await publishToSession(pin, SessionEvent.QuestionLocked, { questionId: current.id, answer: current.answer });
   await publishLeaderboardUpdate(pin);
 
   const isLastQuestion = current.order === session.questions.length - 1;
