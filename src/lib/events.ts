@@ -28,7 +28,8 @@ export type QuestionStartPayload = {
 };
 
 export type AnswerCountUpdatePayload = { answeredCount: number; playerCount: number };
-export type QuestionLockedPayload = { questionId: string };
+/** `answer` is the correct choice's text — safe to reveal now that answering is closed. */
+export type QuestionLockedPayload = { questionId: string; answer: string };
 
 export type LeaderboardEntry = { playerId: string; nickname: string; points: number; rank: number };
 export type LeaderboardUpdatePayload = { leaderboard: LeaderboardEntry[] };
