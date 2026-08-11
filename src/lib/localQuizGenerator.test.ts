@@ -18,6 +18,13 @@ function requestedType(messages: ChatMessage[]): "multiple_choice" | "true_false
   return userContent.includes('"type":"true_false"') ? "true_false" : "multiple_choice";
 }
 
+// checkAnswerable() reuses completeChat (same mock as drafting calls) rather
+// than a separate module like faithfulness, so tests distinguish it by the
+// one phrase only its own prompt contains.
+function isAnswerabilityCheck(messages: ChatMessage[]): boolean {
+  return (messages.find((m) => m.role === "user")?.content ?? "").includes("Marked correct answer:");
+}
+
 // Each call cycles through genuinely distinct facts (not just a numeric
 // suffix — normalizeWords drops words of length <= 3, including bare
 // digits, so e.g. "chapter 1" vs "chapter 2" would normalize to identical
@@ -271,5 +278,53 @@ describe("generateQuiz", () => {
     });
 
     expect(quiz.questions).toHaveLength(1);
+  });
+
+  it("rejects an ambiguous multiple_choice draft and recovers once the answerability check passes", async () => {
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0); // forces multiple_choice every time
+    let answerabilityCalls = 0;
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
+      if (isAnswerabilityCheck(messages)) {
+        answerabilityCalls++;
+        return JSON.stringify({ answerable: answerabilityCalls > 1, reason: "test" });
+      }
+      return validDraftFor(messages);
+    });
+
+    const { generateQuiz } = await import("@/lib/localQuizGenerator");
+    const quiz = await generateQuiz({
+      topics: ["Sanatana Dharma"],
+      sourceText: "",
+      questionCount: 1,
+      difficulty: "mixed",
+      coverageLabel: "Week 1",
+    });
+
+    expect(quiz.questions).toHaveLength(1);
+    expect(quiz.questions[0].type).toBe("multiple_choice");
+    expect(answerabilityCalls).toBeGreaterThan(1);
+    randomSpy.mockRestore();
+  });
+
+  it("drops a multiple_choice slot whose answerability check never passes", async () => {
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0); // forces multiple_choice every time
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
+      if (isAnswerabilityCheck(messages)) {
+        return JSON.stringify({ answerable: false, reason: "always ambiguous" });
+      }
+      return validDraftFor(messages);
+    });
+
+    const { generateQuiz, QuizGenerationError } = await import("@/lib/localQuizGenerator");
+    await expect(
+      generateQuiz({
+        topics: ["Sanatana Dharma"],
+        sourceText: "",
+        questionCount: 1,
+        difficulty: "mixed",
+        coverageLabel: "Week 1",
+      })
+    ).rejects.toThrow(QuizGenerationError);
+    randomSpy.mockRestore();
   });
 });
