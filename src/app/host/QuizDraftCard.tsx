@@ -15,6 +15,7 @@ export function QuizDraftCard({ quiz }: { quiz: { id: string; title: string; que
   const [title, setTitle] = useState(quiz.title);
   const [isSaving, setIsSaving] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
@@ -54,6 +55,21 @@ export function QuizDraftCard({ quiz }: { quiz: { id: string; title: string; que
     }
   }
 
+  async function handleDelete() {
+    if (!window.confirm(`Delete "${title}"? This can't be undone.`)) return;
+    setIsDeleting(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/quizzes/${quiz.id}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not delete this quiz.");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete this quiz.");
+      setIsDeleting(false);
+    }
+  }
+
   return (
     <li className="card flex flex-col gap-4 p-5">
       <div className="flex flex-wrap items-center gap-2">
@@ -68,6 +84,14 @@ export function QuizDraftCard({ quiz }: { quiz: { id: string; title: string; que
         </button>
         <button type="button" onClick={handlePublish} disabled={isPublishing} className="btn btn-primary">
           {isPublishing ? "Publishing…" : "Publish"}
+        </button>
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={isDeleting}
+          className="btn btn-secondary text-danger"
+        >
+          {isDeleting ? "Deleting…" : "Delete"}
         </button>
       </div>
 
