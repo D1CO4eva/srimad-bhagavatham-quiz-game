@@ -1,0 +1,66 @@
+import { db } from "@/lib/db";
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string; questionId: string }> }
+) {
+  const { id, questionId } = await params;
+  const body = await request.json().catch(() => null);
+
+  const question = await db.question.findUnique({
+    where: { id: questionId },
+    select: { id: true, quizId: true, type: true, choices: true },
+  });
+  if (!question || question.quizId !== id) {
+    return Response.json({ error: "Question not found." }, { status: 404 });
+  }
+
+  const quiz = await db.quiz.findUnique({ where: { id }, select: { status: true } });
+  if (!quiz) {
+    return Response.json({ error: "Quiz not found." }, { status: 404 });
+  }
+  if (quiz.status !== "DRAFT") {
+    return Response.json({ error: "Only draft quizzes can be edited." }, { status: 400 });
+  }
+
+  const data: { choices?: string[]; answer?: string } = {};
+
+  if (body?.choices !== undefined) {
+    if (question.type !== "MULTIPLE_CHOICE") {
+      return Response.json(
+        { error: "Only multiple-choice questions support editing choice text." },
+        { status: 400 }
+      );
+    }
+    const choices = Array.isArray(body.choices)
+      ? body.choices
+          .map((choice: unknown) => (typeof choice === "string" ? choice.trim() : ""))
+          .filter((choice: string) => choice !== "")
+      : [];
+    if (choices.length !== 4 || new Set(choices).size !== 4) {
+      return Response.json({ error: "Provide four unique, non-empty choices." }, { status: 400 });
+    }
+    data.choices = choices;
+  }
+
+  if (body?.answer !== undefined) {
+    const answer = typeof body.answer === "string" ? body.answer.trim() : "";
+    const choicePool = data.choices ?? question.choices;
+    if (!answer || !choicePool.includes(answer)) {
+      return Response.json({ error: "answer must be one of the question's choices." }, { status: 400 });
+    }
+    data.answer = answer;
+  }
+
+  if (Object.keys(data).length === 0) {
+    return Response.json({ error: "Nothing to update." }, { status: 400 });
+  }
+
+  const updated = await db.question.update({
+    where: { id: questionId },
+    data,
+    select: { id: true, type: true, question: true, choices: true, answer: true },
+  });
+
+  return Response.json(updated);
+}
