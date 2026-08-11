@@ -1,15 +1,52 @@
-import { db } from "@/lib/db";
+import crypto from "node:crypto";
 import { generateQuiz, QuizGenerationError, type GenerationProgress } from "@/lib/localQuizGenerator";
 import { resolveGenerateQuizRequest } from "@/lib/generateQuizRequest";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
 
+/**
+ * Backend-only entry point for other services to generate a Bhagavatam
+ * class quiz without going through this app's own DB/UI — stateless, no
+ * persistence. Gated by a shared bearer token (GENERATE_QUIZ_API_KEY) since
+ * it calls a budget-metered OpenRouter key directly.
+ */
+function isAuthorized(request: Request): boolean {
+  const expected = process.env.GENERATE_QUIZ_API_KEY;
+  if (!expected) return false;
+
+  const [scheme, token] = (request.headers.get("authorization") ?? "").split(" ");
+  if (scheme !== "Bearer" || !token) return false;
+
+  const tokenBuf = Buffer.from(token);
+  const expectedBuf = Buffer.from(expected);
+  if (tokenBuf.length !== expectedBuf.length) return false;
+  return crypto.timingSafeEqual(tokenBuf, expectedBuf);
+}
+
 export async function POST(request: Request) {
+  if (!isAuthorized(request)) {
+    return Response.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
   const parsed = await resolveGenerateQuizRequest(request);
   if (!parsed.ok) {
     return Response.json({ error: parsed.error }, { status: parsed.status });
   }
   const { questionCount, difficulty, scopeTopics, coverageLabel, sourceText } = parsed.value;
+
+  const wantsStream = (request.headers.get("accept") ?? "").includes("text/event-stream");
+  if (!wantsStream) {
+    try {
+      const quiz = await generateQuiz({ topics: scopeTopics, sourceText, questionCount, difficulty, coverageLabel });
+      return Response.json(quiz);
+    } catch (error) {
+      if (error instanceof QuizGenerationError) {
+        return Response.json({ error: error.message }, { status: 502 });
+      }
+      console.error("Unexpected error during quiz generation:", error);
+      return Response.json({ error: "Unexpected server error while generating the quiz." }, { status: 500 });
+    }
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -19,14 +56,12 @@ export async function POST(request: Request) {
         if (closed) return;
         controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
-      // Independent of how often generation progress actually fires — keeps
-      // the browser-facing connection visibly alive through slow phases.
       const heartbeat = setInterval(() => {
         if (!closed) controller.enqueue(encoder.encode(":heartbeat\n\n"));
       }, HEARTBEAT_INTERVAL_MS);
 
       try {
-        const generated = await generateQuiz({
+        const quiz = await generateQuiz({
           topics: scopeTopics,
           sourceText,
           questionCount,
@@ -34,34 +69,6 @@ export async function POST(request: Request) {
           coverageLabel,
           onProgress: (progress: GenerationProgress) => send("progress", progress),
         });
-
-        const quiz = await db.quiz.create({
-          data: {
-            title: generated.title,
-            description: generated.description,
-            status: "DRAFT",
-            questions: {
-              create: generated.questions.map((question, index) => ({
-                order: index,
-                type: question.type === "true_false" ? "TRUE_FALSE" : "MULTIPLE_CHOICE",
-                question: question.question,
-                choices: question.choices,
-                answer: question.answer,
-                explanation: question.explanation,
-              })),
-            },
-          },
-          select: {
-            id: true,
-            title: true,
-            status: true,
-            questions: {
-              orderBy: { order: "asc" },
-              select: { id: true, order: true, type: true, question: true, choices: true, answer: true, explanation: true },
-            },
-          },
-        });
-
         send("complete", quiz);
       } catch (error) {
         if (error instanceof QuizGenerationError) {

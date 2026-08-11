@@ -46,3 +46,9 @@ next-env.d.ts
 # load-test run artifacts
 /load-test/join-log.txt
 /load-test/players.json
+
+# raw course source PDFs/images downloaded from srimadbhagavatamcourse.org —
+# large binaries, not the deliverable; scripts/build_course_catalog.py's
+# output (content/course-notes/, src/data/courseCatalog.json) is what's
+# committed. See course-materials/README.md to re-download and rebuild.
+/course-materials/raw/

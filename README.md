@@ -47,12 +47,39 @@ npm run docker:down
 ## Quiz content
 
 The host generates quizzes from `/host` by picking a class week (or several)
-and topic(s) — RAG retrieval over Bhagavatam course-note markdowns happens in
-the separate `GOD-Auth-Service` repo (`POST /api/quiz/generate`), scoped to
-the selected week/topic via a static catalog (`COURSE_CATALOG_URL`). This app
-owns its own `Quiz`/`Question` tables — a generated quiz is saved as a draft,
-previewed, and Published before it can be turned into a live session.
-`/host` itself sits behind a shared passcode (`HOST_PASSCODE`).
+and topic(s). Generation is entirely in-house
+(`src/lib/localQuizGenerator.ts`): each question is its own call to an LLM
+via [OpenRouter](https://openrouter.ai) (`openai/gpt-4o-mini` by default,
+falling back to `google/gemini-2.5-flash` on a repair retry), scoped to the
+selected week/topic via this app's own catalog (`src/data/courseCatalog.json`,
+regenerated with `python scripts/build_course_catalog.py` from
+`course-materials/raw/` — see that script's docstring).
+
+Each question is grounded in the actual course-note text for the selected
+week(s) — `src/data/courseNotes.json` (regenerated with
+`node scripts/build_course_notes.mjs` from `content/course-notes/`) is
+included directly in the generation prompt, and every candidate is scored
+against it with [autoevals](https://github.com/braintrustdata/autoevals)'
+RAGAS-style `Faithfulness` metric (`src/lib/faithfulness.ts`, LLM-as-judge,
+using whichever of the two models *didn't* write the question) before it's
+accepted — below a 0.7 score, it's treated like any other validation
+failure in the retry ladder (repair retry, then fallback model, then the
+slot is dropped rather than kept).
+
+The same generator is also exposed as a standalone backend endpoint,
+`POST /generate-quiz` (`src/app/generate-quiz/route.ts`), for other services
+to call directly — same request shape
+(`{ weekIds, topics?, questionCount, difficulty }`), gated by a shared
+bearer token (`GENERATE_QUIZ_API_KEY`), no DB persistence. It streams
+`progress`/`complete`/`error` Server-Sent Events if the caller sends
+`Accept: text/event-stream`, otherwise it awaits generation and returns
+plain JSON.
+
+This app owns its own `Quiz`/`Question` tables — a generated quiz is saved
+as a draft, previewed, and Published before it can be turned into a live
+session. `/host` and all of `/api/quizzes/*` (which now spends the app's own
+OpenRouter budget on generation) sit behind a shared passcode
+(`HOST_PASSCODE`).
 
 ## Deployment
 
@@ -78,9 +105,12 @@ never share credentials.
 6. **`SESSION_SECRET`**: signs the host's session cookie. Generate a fresh
    one for prod (`openssl rand -base64 32`) — do not reuse the local dev
    value.
-7. **`QUIZ_GENERATOR_API_URL`** / **`COURSE_CATALOG_URL`**: the defaults in
-   `.env.example` point at GOD-Auth-Service's public deployment and its
-   course catalog — only override if pointing at a different one.
+7. **`OPENROUTER_API_KEY`**: an [OpenRouter](https://openrouter.ai/keys) key
+   for quiz generation. `OPENROUTER_MODEL_PRIMARY`/`OPENROUTER_MODEL_FALLBACK`
+   are optional overrides of the built-in model defaults. **`GENERATE_QUIZ_API_KEY`**:
+   a random shared secret (`openssl rand -base64 32`) other services must
+   present as a bearer token to call `POST /generate-quiz` — do not reuse
+   any other secret for this.
 8. Deploy the Next.js app itself anywhere that supports it (Vercel is the
    path of least resistance for this stack — git push, no server to manage).
    HTTPS/WSS is automatic on Vercel and most other platforms; Ably's client

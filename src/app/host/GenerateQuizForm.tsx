@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import type { PublicCourseWeek } from "@/lib/courseCatalog";
+import type { GenerationProgress } from "@/lib/localQuizGenerator";
+import { extractSseFrames, parseSseFrame } from "@/lib/sse";
 
 const QUESTION_COUNTS = [5, 8, 10, 15, 20, 25, 30, 35] as const;
 const DIFFICULTIES = [
@@ -12,6 +14,13 @@ const DIFFICULTIES = [
   { label: "Challenge", value: "advanced" },
 ] as const;
 
+function progressLabel(progress: GenerationProgress | null): string {
+  if (!progress) return "Generating…";
+  if (progress.phase === "draft") return `Generating… ${progress.completed} of ${progress.total} questions`;
+  if (progress.phase === "repairing") return "Fixing up a few questions…";
+  return "Double-checking against the source material…";
+}
+
 export function GenerateQuizForm({ weeks }: { weeks: PublicCourseWeek[] }) {
   const router = useRouter();
   const [coverageMode, setCoverageMode] = useState<"single" | "multiple">("single");
@@ -20,6 +29,7 @@ export function GenerateQuizForm({ weeks }: { weeks: PublicCourseWeek[] }) {
   const [questionCount, setQuestionCount] = useState<number>(8);
   const [difficulty, setDifficulty] = useState<string>("mixed");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [progress, setProgress] = useState<GenerationProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -69,6 +79,7 @@ export function GenerateQuizForm({ weeks }: { weeks: PublicCourseWeek[] }) {
       return;
     }
     setIsGenerating(true);
+    setProgress(null);
     setError(null);
     setNotice(null);
     try {
@@ -82,14 +93,49 @@ export function GenerateQuizForm({ weeks }: { weeks: PublicCourseWeek[] }) {
           difficulty,
         }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Could not generate a quiz.");
-      setNotice(`Generated "${data.title}" with ${data.questions.length} questions — review it below and publish when ready.`);
+
+      // Validation/catalog failures come back as a plain JSON error before
+      // the response ever upgrades to an event stream (see route.ts).
+      if (!(response.headers.get("content-type") ?? "").includes("text/event-stream")) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error ?? "Could not generate a quiz.");
+      }
+      if (!response.body) throw new Error("Could not generate a quiz.");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let result: { title: string; questions: unknown[] } | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const { frames, rest } = extractSseFrames(buffer);
+        buffer = rest;
+        for (const frame of frames) {
+          const parsed = parseSseFrame(frame);
+          if (!parsed) continue; // heartbeat comment
+
+          if (parsed.event === "progress") {
+            setProgress(parsed.data as GenerationProgress);
+          } else if (parsed.event === "complete") {
+            result = parsed.data as { title: string; questions: unknown[] };
+          } else if (parsed.event === "error") {
+            throw new Error((parsed.data as { error?: string }).error ?? "Could not generate a quiz.");
+          }
+        }
+      }
+
+      if (!result) throw new Error("Quiz generator's stream ended without a result.");
+      setNotice(`Generated "${result.title}" with ${result.questions.length} questions — review it below and publish when ready.`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate a quiz.");
     } finally {
       setIsGenerating(false);
+      setProgress(null);
     }
   }
 
@@ -200,7 +246,7 @@ export function GenerateQuizForm({ weeks }: { weeks: PublicCourseWeek[] }) {
       </div>
 
       <button type="submit" disabled={isGenerating} className="btn btn-primary self-start">
-        {isGenerating ? "Generating…" : "Generate Quiz"}
+        {isGenerating ? progressLabel(progress) : "Generate Quiz"}
       </button>
       {error && <p className="text-sm text-danger">{error}</p>}
       {notice && <p className="text-sm font-semibold text-success">{notice}</p>}

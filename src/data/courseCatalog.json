@@ -1,0 +1,155 @@
+{
+  "weeks": [
+    {
+      "id": "week-1",
+      "label": "Week 1",
+      "topics": [
+        "Sanatana Dharma",
+        "Our Grand Shastras - Overview",
+        "Place of Puranas in Shastras",
+        "Place of Itihasas & Puranas in Shastras"
+      ],
+      "source_documents": [
+        {
+          "id": "week-1-eng-sb-course",
+          "name": "Week 1-ENG-SB Course.pdf",
+          "topics_from_headings": [
+            "Sanatana Dharma",
+            "Our Grand Shastras - Overview",
+            "Place of Puranas in Shastras",
+            "Place of Itihasas & Puranas in Shastras"
+          ]
+        },
+        {
+          "id": "week1-infographic",
+          "name": "week1-infographic.jpg",
+          "topics_from_headings": []
+        }
+      ]
+    },
+    {
+      "id": "week-2",
+      "label": "Week 2",
+      "topics": [
+        "Srimad Bhagavatam is the essence of all scriptures",
+        "Srimad Bhagavatam is Bhagavan Himself"
+      ],
+      "source_documents": [
+        {
+          "id": "sbcc-e-2-notes-pdf",
+          "name": "SBCC E 2 Notes PDF.pdf",
+          "topics_from_headings": [
+            "Srimad Bhagavatam is the essence of all scriptures",
+            "Srimad Bhagavatam is Bhagavan Himself"
+          ]
+        },
+        {
+          "id": "week2-infographic",
+          "name": "week2-infographic.jpg",
+          "topics_from_headings": []
+        }
+      ]
+    },
+    {
+      "id": "week-3",
+      "label": "Week 3",
+      "topics": [
+        "Being a Rasika",
+        "Srimad Bhagavata Mahatmyam",
+        "Four Stories to the Fore"
+      ],
+      "source_documents": [
+        {
+          "id": "week-3-eng-sb-course-2-with-3-stories",
+          "name": "Week 3-ENG-SB Course 2 - With 3 Stories.pdf",
+          "topics_from_headings": [
+            "Being a Rasika",
+            "Srimad Bhagavata Mahatmyam",
+            "Four Stories to the Fore"
+          ]
+        },
+        {
+          "id": "week3-infographic",
+          "name": "week3-infographic.jpg",
+          "topics_from_headings": []
+        }
+      ]
+    },
+    {
+      "id": "week-4",
+      "label": "Week 4",
+      "topics": [
+        "The story of Atmadeva",
+        "Lineage of Srimad Bhagavatam",
+        "Story of Atmadeva",
+        "Structure of Srimad Bhagavatam"
+      ],
+      "source_documents": [
+        {
+          "id": "sb-week4-infographics",
+          "name": "SB Week4-Infographics.jpeg",
+          "topics_from_headings": []
+        },
+        {
+          "id": "week-4-eng-sb-course-2-pdf",
+          "name": "Week 4-ENG-SB Course 2 PDF.pdf",
+          "topics_from_headings": [
+            "The story of Atmadeva",
+            "Lineage of Srimad Bhagavatam",
+            "Story of Atmadeva",
+            "Structure of Srimad Bhagavatam"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "week-5",
+      "label": "Week 5",
+      "topics": [
+        "Deeper dive into Puranas",
+        "Srimad Bhagavatam the ‘Maha’-Purana",
+        "Canto 1 begins",
+        "Srimad Bhagavatam Is A Mahapurana",
+        "Canto 1 - Part 1"
+      ],
+      "source_documents": [
+        {
+          "id": "sbcc-e-5-notes-pdf",
+          "name": "SBCC E 5 Notes PDF.pdf",
+          "topics_from_headings": [
+            "Deeper dive into Puranas",
+            "Srimad Bhagavatam the ‘Maha’-Purana",
+            "Canto 1 begins",
+            "Srimad Bhagavatam Is A Mahapurana",
+            "Canto 1 - Part 1"
+          ]
+        },
+        {
+          "id": "week5-infographics",
+          "name": "Week5-Infographics.jpeg",
+          "topics_from_headings": []
+        }
+      ]
+    },
+    {
+      "id": "week-6",
+      "label": "Week 6",
+      "topics": [
+        "Canto 1 Answers",
+        "Sage Narada Sage - Sri Veda Vyasa Conversation",
+        "Sage Narada & Sage Veda Vyasa’s Conversation"
+      ],
+      "source_documents": [
+        {
+          "id": "sbcc-e-6-notes-pdf",
+          "name": "SBCC E 6 Notes PDF.pdf",
+          "topics_from_headings": [
+            "Canto 1 Answers",
+            "Sage Narada Sage - Sri Veda Vyasa Conversation",
+            "Sage Narada & Sage Veda Vyasa’s Conversation"
+          ]
+        }
+      ]
+    }
+  ]
+}
