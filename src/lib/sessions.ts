@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { generateUniquePin } from "@/lib/pin";
 import { publishToSession } from "@/lib/ably";
 import { SessionEvent } from "@/lib/events";
+import { toPublicQuestion } from "@/lib/questions";
 
 export class QuizNotFoundError extends Error {
   constructor(quizId: string) {
@@ -54,20 +55,42 @@ export async function createGameSession(quizId: string) {
   });
 }
 
-/** Moves a session from LOBBY to ACTIVE once the host clicks "Start Game" (Story 2.3). */
+/**
+ * Moves a session from LOBBY to ACTIVE once the host clicks "Start Game"
+ * (Story 2.3), and immediately advances straight into the first question —
+ * the host shouldn't have to click "Start Game" and then a separate "Next
+ * Question" just to reach question 1.
+ */
 export async function startGameSession(pin: string) {
   const session = await db.gameSession.findFirst({
     where: { pin, status: "LOBBY" },
-    include: { _count: { select: { players: true } } },
+    include: {
+      _count: { select: { players: true } },
+      questions: { orderBy: { order: "asc" } },
+    },
   });
   if (!session || session._count.players < 1) {
     throw new SessionNotStartableError(pin);
   }
+  const firstQuestion = session.questions[0];
+  if (!firstQuestion) {
+    throw new SessionNotStartableError(pin);
+  }
 
-  await db.gameSession.update({
-    where: { id: session.id },
-    data: { status: "ACTIVE", startedAt: new Date() },
-  });
+  const startedAt = new Date();
+  await db.$transaction([
+    db.gameSession.update({
+      where: { id: session.id },
+      data: { status: "ACTIVE", startedAt, currentQuestionIndex: 0 },
+    }),
+    db.gameSessionQuestion.update({
+      where: { id: firstQuestion.id },
+      data: { startedAt },
+    }),
+  ]);
 
   await publishToSession(pin, SessionEvent.GameStarted, {});
+  const payload = toPublicQuestion({ ...firstQuestion, startedAt });
+  await publishToSession(pin, SessionEvent.QuestionStart, payload);
+  return payload;
 }
