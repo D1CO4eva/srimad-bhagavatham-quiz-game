@@ -2,9 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { EditableQuestion } from "./EditableQuestion";
 
 type DraftQuestion = {
   id: string;
+  type: "MULTIPLE_CHOICE" | "TRUE_FALSE" | "SHORT_ANSWER";
   question: string;
   choices: string[];
   answer: string;
@@ -18,6 +20,9 @@ export function QuizDraftCard({ quiz }: { quiz: { id: string; title: string; que
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  // Lifted out of EditableQuestion so a saved edit survives collapsing and
+  // re-expanding the "Preview questions" panel.
+  const [questions, setQuestions] = useState(quiz.questions);
 
   async function patch(body: { title?: string; publish?: boolean }) {
     const response = await fetch(`/api/quizzes/${quiz.id}`, {
@@ -97,7 +102,7 @@ export function QuizDraftCard({ quiz }: { quiz: { id: string; title: string; que
 
       <div className="flex items-center justify-between text-sm text-ink-soft">
         <span>
-          {quiz.questions.length} question{quiz.questions.length === 1 ? "" : "s"} · Draft
+          {questions.length} question{questions.length === 1 ? "" : "s"} · Draft
         </span>
         <button type="button" onClick={() => setExpanded((v) => !v)} className="font-semibold text-brand-ink">
           {expanded ? "Hide questions" : "Preview questions"}
@@ -106,23 +111,18 @@ export function QuizDraftCard({ quiz }: { quiz: { id: string; title: string; que
 
       {expanded && (
         <ol className="flex flex-col gap-3">
-          {quiz.questions.map((question, index) => (
-            <li key={question.id} className="rounded-2xl border border-line p-4 text-sm">
-              <p className="font-semibold text-ink">
-                {index + 1}. {question.question}
-              </p>
-              <ul className="mt-2 flex flex-col gap-1">
-                {question.choices.map((choice) => (
-                  <li
-                    key={choice}
-                    className={choice === question.answer ? "font-semibold text-success" : "text-ink-soft"}
-                  >
-                    {choice === question.answer ? "✓ " : "— "}
-                    {choice}
-                  </li>
-                ))}
-              </ul>
-            </li>
+          {questions.map((question, index) => (
+            <EditableQuestion
+              key={question.id}
+              quizId={quiz.id}
+              question={question}
+              index={index}
+              onSaved={(updated) =>
+                setQuestions((current) =>
+                  current.map((q) => (q.id === question.id ? { ...q, ...updated } : q))
+                )
+              }
+            />
           ))}
         </ol>
       )}
