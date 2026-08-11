@@ -46,6 +46,13 @@ const TRUE_FALSE_FACTS = [
 ];
 let draftCounter = 0;
 function validDraftFor(messages: ChatMessage[]): string {
+  // checkAnswerable() also goes through completeChat — default it to a
+  // benign pass so tests that aren't specifically about answerability don't
+  // need to think about it, and (just as importantly) so it doesn't consume
+  // a draftCounter tick and throw off which fact each real draft call gets.
+  if (isAnswerabilityCheck(messages)) {
+    return JSON.stringify({ answerable: true, reason: "fine" });
+  }
   const index = draftCounter++ % MULTIPLE_CHOICE_FACTS.length;
   if (requestedType(messages) === "true_false") {
     return JSON.stringify({ type: "true_false", question: TRUE_FALSE_FACTS[index], answer: "True", explanation: "Because." });
