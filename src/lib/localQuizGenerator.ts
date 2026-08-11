@@ -19,6 +19,17 @@
  * Restricted to multiple_choice/true_false — the only types the live tap
  * UI can render (see Answer model's comment in schema.prisma).
  *
+ * Answerability (checkAnswerable, multiple_choice only) catches a different
+ * defect from faithfulness: a question whose marked answer is factually
+ * correct per the source, but whose wording doesn't narrow the choices down
+ * to just one of them — e.g. "who is first in the lineage of transmission"
+ * with four choices that are all real, named members of that lineage. The
+ * marked answer being true isn't enough; the question has to actually let a
+ * student *reason their way* to it rather than guess among equally
+ * plausible options. Uses a dedicated judge call (own prompt, not part of
+ * autoevals' Faithfulness) since "is this true" and "does this question
+ * have exactly one defensible answer" are different questions entirely.
+ *
  * Duplicate detection (findDuplicate) catches questions that reuse the same
  * fact even when reworded — e.g. two differently-phrased questions that
  * both boil down to "what is Ashraya" with the same four answer choices
@@ -81,7 +92,7 @@ export class QuizGenerationError extends Error {
 type Difficulty = "beginner" | "intermediate" | "advanced" | "mixed";
 type EffectiveDifficulty = "beginner" | "intermediate" | "advanced";
 type QuestionType = "multiple_choice" | "true_false";
-type FailureReason = "invalid_json" | "low_faithfulness" | "duplicate";
+type FailureReason = "invalid_json" | "low_faithfulness" | "duplicate" | "ambiguous";
 
 const DIFFICULTY_GUIDANCE: Record<EffectiveDifficulty, string> = {
   beginner: "a straightforward recall question testing a clearly stated fact from the topic",
@@ -130,6 +141,63 @@ function findDuplicate(candidate: GeneratedQuestion, existing: GeneratedQuestion
     }
   }
   return null;
+}
+
+const AnswerabilityJudgeSchema = z.object({
+  answerable: z.boolean(),
+  reason: z.string().optional(),
+});
+
+/**
+ * Judges whether a multiple_choice question's wording actually narrows its
+ * four choices down to one defensible answer, as opposed to the marked
+ * answer merely being *a* true fact among several plausible-sounding ones.
+ * See the module docstring for why this is separate from faithfulness.
+ * Returns null (skip — don't block on it) if the judge call itself fails or
+ * returns something unparseable; a validator outage shouldn't silently drop
+ * an otherwise-good question.
+ */
+async function checkAnswerable(question: GeneratedQuestion, sourceText: string, judgeModel: string): Promise<boolean | null> {
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content:
+        "You are a strict quality reviewer for multiple-choice quiz questions on the Srimad Bhagavatam. " +
+        "Respond with a single strict JSON object only — no markdown code fences, no commentary.",
+    },
+    {
+      role: "user",
+      content: [
+        sourceText.trim() ? `Source excerpt:\n"""\n${sourceText.trim()}\n"""\n` : "",
+        `Question: ${question.question}`,
+        `Choices: ${question.choices.join(" / ")}`,
+        `Marked correct answer: ${question.answer}`,
+        "",
+        "The bar is NOT just \"does the source support the marked answer\" — a question can be perfectly " +
+          "true and still be a bad question. It FAILS if the only way to pick the marked answer over the " +
+          "others is to have memorized an arbitrary sequence, list order, or position, when the other choices " +
+          "are otherwise equally valid members of the same category and nothing in the question or choices " +
+          "helps distinguish them. Concretely: \"Who is first in the lineage of transmission?\" with choices " +
+          "Vāsudeva / Brahma / Narada / Vyasa FAILS — all four are genuinely part of that lineage, and " +
+          "\"first\" is only recoverable by having memorized the exact numbered order, not by reasoning about " +
+          "the material. It PASSES if the question tests a relationship, distinguishing trait, or cause that " +
+          "the other choices clearly don't share (e.g. \"who is described as the original source that the " +
+          "entire lineage comes from?\", where the other names are downstream links, not the source itself).",
+        'Return JSON matching exactly this shape: {"answerable": true or false, "reason": "one short sentence"}',
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    },
+  ];
+
+  const raw = await tryComplete(judgeModel, messages);
+  if (!raw) return null;
+  try {
+    const result = AnswerabilityJudgeSchema.safeParse(JSON.parse(raw));
+    return result.success ? result.data.answerable : null;
+  } catch {
+    return null;
+  }
 }
 
 function clampSourceText(sourceText: string): string {
@@ -206,7 +274,14 @@ function buildUserPrompt(params: {
   );
   if (params.type === "multiple_choice") {
     lines.push(
-      'Exactly 4 choices, only one correct, choices in a random order, and "answer" must match one of the choices character-for-character.'
+      'Exactly 4 choices, only one correct, choices in a random order, and "answer" must match one of the choices character-for-character.',
+      "The three wrong choices must be clearly and definitively wrong — not just different, less complete, " +
+        "or other real facts from the same list. Avoid bare ordinal/sequence questions over a named list " +
+        "(\"who is first/second in this lineage\", \"which came right after X\") when the other choices are " +
+        "also genuine members of that same list — the only way to answer those is memorizing exact list " +
+        "order, not reasoning about the material, even though the source technically supports one answer. " +
+        "Prefer testing a relationship, distinguishing trait, or cause instead (e.g. who something originates " +
+        "from, who directly did X, what makes one option different in kind from the others)."
     );
   }
 
@@ -302,6 +377,13 @@ async function attemptDraft(params: {
     return { ok: false, reason: "low_faithfulness", raw };
   }
 
+  if (parsed.type === "multiple_choice") {
+    const answerable = await checkAnswerable(parsed, params.sourceText, params.judgeModel);
+    if (answerable === false) {
+      return { ok: false, reason: "ambiguous", raw };
+    }
+  }
+
   return { ok: true, question: parsed };
 }
 
@@ -319,6 +401,17 @@ function repairPrompt(reason: FailureReason, raw: string, duplicateOf?: string):
       "same underlying fact, the same correct answer, or nearly the same answer choices. Pick a different " +
       "specific detail, term, or angle instead — it can be the same general topic, but must test something " +
       "genuinely different. Respond again with ONLY the corrected JSON object."
+    );
+  }
+  if (reason === "ambiguous") {
+    return (
+      `Here is what you sent:\n${raw}\n\n` +
+      "The marked answer is true, but more than one of the choices is a genuinely defensible answer to the " +
+      "question as worded — a student can't reason their way to the single correct choice from the question " +
+      "text alone, only by already knowing the answer. Reword the question to pin down exactly which fact, " +
+      "position, or relationship you're asking about (e.g. name a specific step, role, or comparison) so only " +
+      "one choice fits, or write different choices that are clearly wrong rather than other real facts from " +
+      "the same list. Respond again with ONLY the corrected JSON object."
     );
   }
   return (
