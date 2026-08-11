@@ -12,12 +12,26 @@
  * Each question slot gets its own model call so one bad response only costs
  * a single question, with a retry ladder per slot: primary model -> repair
  * retry (same model, shown its own bad output and, if the failure was low
- * faithfulness, told so) -> fallback model. The faithfulness judge is
- * always the *other* model from whichever one drafted the candidate, so a
- * model never grades its own output. A second pass re-attempts only the
- * slots still missing after the first full pass. Restricted to
- * multiple_choice/true_false — the only types the live tap UI can render
- * (see Answer model's comment in schema.prisma).
+ * faithfulness or a duplicate, told so) -> fallback model. The faithfulness
+ * judge is always the *other* model from whichever one drafted the
+ * candidate, so a model never grades its own output. A second pass
+ * re-attempts only the slots still missing after the first full pass.
+ * Restricted to multiple_choice/true_false — the only types the live tap
+ * UI can render (see Answer model's comment in schema.prisma).
+ *
+ * Duplicate detection (findDuplicate) catches questions that reuse the same
+ * fact even when reworded — e.g. two differently-phrased questions that
+ * both boil down to "what is Ashraya" with the same four answer choices
+ * just reordered. Word-overlap on the question text alone misses this (the
+ * wording can differ a lot); what's actually diagnostic for multiple-choice
+ * is a shared answer *plus* overlapping choice sets, since a course with a
+ * fixed technical vocabulary (e.g. the ten characteristics of a Purana)
+ * will legitimately reuse individual terms as distractors across genuinely
+ * different questions — it's reusing the same answer with mostly the same
+ * options that signals "this is the same question again," not just
+ * touching the same topic. Checked per-slot against everything generated
+ * so far, and swept again at the end since bounded concurrency lets two
+ * slots pass their own check against the same stale snapshot at once.
  */
 
 import { nanoid } from "nanoid";
@@ -30,6 +44,7 @@ const DEFAULT_FALLBACK_MODEL = "google/gemini-2.5-flash";
 const CONCURRENCY = 4;
 const MULTIPLE_CHOICE_RATIO = 0.75;
 const FAITHFULNESS_THRESHOLD = 0.7;
+const DUPLICATE_OVERLAP_THRESHOLD = 0.5;
 // The whole course-notes corpus is ~70KB (see src/data/courseNotes.json) —
 // comfortably under this even if a host selects every week at once. This is
 // a safety cap against a much larger future corpus, not a normal-path limit.
@@ -66,7 +81,7 @@ export class QuizGenerationError extends Error {
 type Difficulty = "beginner" | "intermediate" | "advanced" | "mixed";
 type EffectiveDifficulty = "beginner" | "intermediate" | "advanced";
 type QuestionType = "multiple_choice" | "true_false";
-type FailureReason = "invalid_json" | "low_faithfulness";
+type FailureReason = "invalid_json" | "low_faithfulness" | "duplicate";
 
 const DIFFICULTY_GUIDANCE: Record<EffectiveDifficulty, string> = {
   beginner: "a straightforward recall question testing a clearly stated fact from the topic",
@@ -82,6 +97,39 @@ function pickEffectiveDifficulty(difficulty: Difficulty): EffectiveDifficulty {
 
 function pickQuestionType(): QuestionType {
   return Math.random() < MULTIPLE_CHOICE_RATIO ? "multiple_choice" : "true_false";
+}
+
+function normalizeWords(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 3)
+  );
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const word of a) if (b.has(word)) intersection++;
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/** See the module docstring for why this checks answer+choices, not just question-text similarity. */
+function findDuplicate(candidate: GeneratedQuestion, existing: GeneratedQuestion[]): GeneratedQuestion | null {
+  const candidateQuestionWords = normalizeWords(candidate.question);
+  for (const other of existing) {
+    if (jaccard(candidateQuestionWords, normalizeWords(other.question)) >= DUPLICATE_OVERLAP_THRESHOLD) {
+      return other;
+    }
+    if (candidate.type === "multiple_choice" && other.type === "multiple_choice") {
+      const sameAnswer = candidate.answer.trim().toLowerCase() === other.answer.trim().toLowerCase();
+      const choiceOverlap = jaccard(normalizeWords(candidate.choices.join(" ")), normalizeWords(other.choices.join(" ")));
+      if (sameAnswer && choiceOverlap >= DUPLICATE_OVERLAP_THRESHOLD) return other;
+    }
+  }
+  return null;
 }
 
 function clampSourceText(sourceText: string): string {
@@ -111,7 +159,7 @@ function buildUserPrompt(params: {
   coverageLabel: string;
   type: QuestionType;
   effectiveDifficulty: EffectiveDifficulty;
-  avoidQuestions: string[];
+  avoidEntries: GeneratedQuestion[];
   sourceText: string;
 }): string {
   const topicList = params.topics.length > 0 ? params.topics.join("; ") : params.coverageLabel;
@@ -137,10 +185,16 @@ function buildUserPrompt(params: {
       : `Write ${DIFFICULTY_GUIDANCE[params.effectiveDifficulty]}, phrased as a true/false statement.`
   );
 
-  if (params.avoidQuestions.length > 0) {
+  if (params.avoidEntries.length > 0) {
     lines.push(
-      "Do not test the same underlying fact or claim as any of these already-used questions, even if reworded:",
-      ...params.avoidQuestions.map((q) => `- ${q}`)
+      "Do not test the same underlying fact, reuse the same correct answer, or reuse the same answer " +
+        "choices (even reordered) as any of these already-used questions — pick a different specific " +
+        "detail or aspect instead, even if it's the same general topic:",
+      ...params.avoidEntries.map((q) =>
+        q.type === "multiple_choice"
+          ? `- "${q.question}" — choices: ${q.choices.join(" / ")}; answer: ${q.answer}`
+          : `- "${q.question}" — answer: ${q.answer}`
+      )
     );
   }
 
@@ -219,7 +273,9 @@ async function tryComplete(model: string, messages: ChatMessage[]): Promise<stri
   }
 }
 
-type AttemptResult = { ok: true; question: GeneratedQuestion } | { ok: false; reason: FailureReason; raw: string | null };
+type AttemptResult =
+  | { ok: true; question: GeneratedQuestion }
+  | { ok: false; reason: FailureReason; raw: string | null; duplicateOf?: string };
 
 async function attemptDraft(params: {
   model: string;
@@ -227,12 +283,18 @@ async function attemptDraft(params: {
   messages: ChatMessage[];
   type: QuestionType;
   sourceText: string;
+  avoidEntries: GeneratedQuestion[];
 }): Promise<AttemptResult> {
   const raw = await tryComplete(params.model, params.messages);
   if (!raw) return { ok: false, reason: "invalid_json", raw: null };
 
   const parsed = parseDraft(raw, params.type);
   if (!parsed) return { ok: false, reason: "invalid_json", raw };
+
+  const duplicate = findDuplicate(parsed, params.avoidEntries);
+  if (duplicate) {
+    return { ok: false, reason: "duplicate", raw, duplicateOf: duplicate.question };
+  }
 
   const claim = `Question: ${parsed.question}\nAnswer: ${parsed.answer}\nExplanation: ${parsed.explanation}`;
   const faithfulness = await scoreFaithfulness(claim, params.sourceText, params.judgeModel);
@@ -243,11 +305,20 @@ async function attemptDraft(params: {
   return { ok: true, question: parsed };
 }
 
-function repairPrompt(reason: FailureReason, raw: string): string {
+function repairPrompt(reason: FailureReason, raw: string, duplicateOf?: string): string {
   if (reason === "invalid_json") {
     return (
       `That response was not valid JSON matching the requested shape. Here is what you sent:\n${raw}\n\n` +
       "Respond again with ONLY a corrected JSON object matching the shape above."
+    );
+  }
+  if (reason === "duplicate") {
+    return (
+      `Here is what you sent:\n${raw}\n\n` +
+      `That overlaps too much with an already-used question${duplicateOf ? ` ("${duplicateOf}")` : ""} — the ` +
+      "same underlying fact, the same correct answer, or nearly the same answer choices. Pick a different " +
+      "specific detail, term, or angle instead — it can be the same general topic, but must test something " +
+      "genuinely different. Respond again with ONLY the corrected JSON object."
     );
   }
   return (
@@ -263,7 +334,7 @@ async function generateSlot(params: {
   focusTopic: string | null;
   coverageLabel: string;
   difficulty: Difficulty;
-  avoidQuestions: string[];
+  avoidEntries: GeneratedQuestion[];
   sourceText: string;
   primaryModel: string;
   fallbackModel: string;
@@ -280,7 +351,7 @@ async function generateSlot(params: {
         coverageLabel: params.coverageLabel,
         type,
         effectiveDifficulty,
-        avoidQuestions: params.avoidQuestions,
+        avoidEntries: params.avoidEntries,
         sourceText: params.sourceText,
       }),
     },
@@ -292,17 +363,22 @@ async function generateSlot(params: {
     messages,
     type,
     sourceText: params.sourceText,
+    avoidEntries: params.avoidEntries,
   });
   if (first.ok) return first.question;
 
   if (first.raw) {
-    const repairMessages: ChatMessage[] = [...messages, { role: "user", content: repairPrompt(first.reason, first.raw) }];
+    const repairMessages: ChatMessage[] = [
+      ...messages,
+      { role: "user", content: repairPrompt(first.reason, first.raw, first.duplicateOf) },
+    ];
     const second = await attemptDraft({
       model: params.primaryModel,
       judgeModel: params.fallbackModel,
       messages: repairMessages,
       type,
       sourceText: params.sourceText,
+      avoidEntries: params.avoidEntries,
     });
     if (second.ok) return second.question;
   }
@@ -313,6 +389,7 @@ async function generateSlot(params: {
     messages,
     type,
     sourceText: params.sourceText,
+    avoidEntries: params.avoidEntries,
   });
   return third.ok ? third.question : null;
 }
@@ -345,13 +422,13 @@ export async function generateQuiz(params: {
     async function worker() {
       while (cursor < indices.length) {
         const slotIndex = indices[cursor++];
-        const avoidQuestions = slots.filter((q): q is GeneratedQuestion => q !== null).map((q) => q.question);
+        const avoidEntries = slots.filter((q): q is GeneratedQuestion => q !== null);
         slots[slotIndex] = await generateSlot({
           topics: params.topics,
           focusTopic: focusTopicFor(slotIndex),
           coverageLabel: params.coverageLabel,
           difficulty: params.difficulty,
-          avoidQuestions,
+          avoidEntries,
           sourceText,
           primaryModel,
           fallbackModel,
@@ -374,6 +451,27 @@ export async function generateQuiz(params: {
   if (missingIndices.length > 0) {
     completedCount = params.questionCount - missingIndices.length;
     await runPass(missingIndices, "repairing");
+  }
+
+  // Bounded concurrency means two slots can each pass their own duplicate
+  // check against the same not-yet-updated snapshot before either result is
+  // recorded, letting a duplicate through the per-slot ladder above. Sweep
+  // the finished slots in order and regenerate any later one that
+  // duplicates an earlier one, now against the complete set.
+  const acceptedSoFar: GeneratedQuestion[] = [];
+  const duplicateIndices: number[] = [];
+  slots.forEach((question, index) => {
+    if (!question) return;
+    if (findDuplicate(question, acceptedSoFar)) {
+      duplicateIndices.push(index);
+    } else {
+      acceptedSoFar.push(question);
+    }
+  });
+  if (duplicateIndices.length > 0) {
+    for (const index of duplicateIndices) slots[index] = null;
+    completedCount = params.questionCount - duplicateIndices.length;
+    await runPass(duplicateIndices, "repairing");
   }
 
   const questions = slots.filter((q): q is GeneratedQuestion => q !== null);
