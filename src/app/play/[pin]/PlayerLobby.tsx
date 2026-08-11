@@ -7,6 +7,7 @@ import {
   type LeaderboardEntry,
   type LeaderboardUpdatePayload,
   type PodiumPayload,
+  type QuestionLockedPayload,
   type QuestionStartPayload,
 } from "@/lib/events";
 import { measureLatency } from "@/lib/latency";
@@ -27,6 +28,7 @@ export function PlayerLobby({
   initialQuestion,
   initialLocked,
   initialMyChoice,
+  initialRevealedAnswer,
 }: {
   pin: string;
   playerId: string;
@@ -36,10 +38,12 @@ export function PlayerLobby({
   initialQuestion: QuestionStartPayload | null;
   initialLocked: boolean;
   initialMyChoice: number | null;
+  initialRevealedAnswer: string | null;
 }) {
   const [gameStarted, setGameStarted] = useState(initialGameStarted);
   const [question, setQuestion] = useState<QuestionStartPayload | null>(initialQuestion);
   const [locked, setLocked] = useState(initialLocked);
+  const [revealedAnswer, setRevealedAnswer] = useState<string | null>(initialRevealedAnswer);
   const [myChoice, setMyChoice] = useState<number | null>(initialMyChoice);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [myRank, setMyRank] = useState<{ rank: number; points: number } | null>(null);
@@ -63,12 +67,17 @@ export function PlayerLobby({
     const onQuestionStart = (message: InboundMessage) => {
       setQuestion(message.data as QuestionStartPayload);
       setLocked(false);
+      setRevealedAnswer(null);
       setMyChoice(null);
       setSubmitError(null);
       setMyRank(null);
       setLeaderboard(null);
     };
-    const onQuestionLocked = () => setLocked(true);
+    const onQuestionLocked = (message: InboundMessage) => {
+      const data = message.data as QuestionLockedPayload;
+      setLocked(true);
+      setRevealedAnswer(data.answer);
+    };
     const onLeaderboardUpdate = (message: InboundMessage) => {
       setLeaderboard((message.data as LeaderboardUpdatePayload).leaderboard);
     };
@@ -173,24 +182,37 @@ export function PlayerLobby({
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
         <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>
-        {myChoice !== null ? (
-          <p className="pill-badge">{submitError ?? "Answer locked in!"}</p>
+        {myChoice !== null && submitError ? (
+          <p className="pill-badge">{submitError}</p>
+        ) : myChoice !== null && locked && revealedAnswer !== null ? (
+          question.choices[myChoice] === revealedAnswer ? (
+            <p className="pill-badge bg-success-soft text-success">Correct! ✓</p>
+          ) : (
+            <p className="pill-badge bg-danger-soft text-danger">Incorrect ✗</p>
+          )
+        ) : myChoice !== null ? (
+          <p className="pill-badge">Answer locked in!</p>
         ) : locked ? (
           <p className="pill-badge">Time&apos;s up!</p>
         ) : (
           <p className="pill-badge">Tap your answer</p>
         )}
         <div className="grid w-full max-w-sm grid-cols-2 gap-4">
-          {question.choices.map((_, index) => {
+          {question.choices.map((choice, index) => {
             const shape = ANSWER_SHAPES[index % ANSWER_SHAPES.length];
             const disabled = myChoice !== null || locked;
+            const isRevealed = revealedAnswer !== null;
+            const isCorrectChoice = isRevealed && choice === revealedAnswer;
+            const opacityClass = isRevealed ? (isCorrectChoice ? "" : "opacity-30") : disabled ? "opacity-40" : "";
             return (
               <button
                 key={index}
                 type="button"
                 disabled={disabled}
                 onClick={() => handleAnswer(index)}
-                className="aspect-square rounded-2xl text-white shadow-lg transition-opacity disabled:opacity-40"
+                className={`aspect-square rounded-2xl text-white shadow-lg transition-all duration-500 ${opacityClass} ${
+                  isCorrectChoice ? "ring-4 ring-success" : ""
+                }`}
                 style={{ backgroundColor: shape.color }}
                 aria-label={shape.label}
               />
