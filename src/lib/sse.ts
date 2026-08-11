@@ -15,9 +15,8 @@ export function parseSseFrame(frame: string): { event: string; data: unknown } |
 
 // Splits a growing buffer of raw SSE bytes into complete frames as they
 // become available, leaving any trailing partial frame in the buffer for
-// the next chunk. Shared by the server-side client (quizGenerator.ts,
-// reading from GOD-Auth-Service) and the browser-side client
-// (GenerateQuizForm.tsx, reading from this app's own passthrough route).
+// the next chunk. Shared by the browser-side client (GenerateQuizForm.tsx)
+// and, for callers that opt into streaming, /generate-quiz's own consumers.
 export function extractSseFrames(buffer: string): { frames: string[]; rest: string } {
   const frames: string[] = [];
   let rest = buffer;

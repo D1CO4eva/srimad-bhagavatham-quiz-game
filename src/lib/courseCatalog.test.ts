@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { getCourseCatalog, resolveSourceSelection, toPublicCourseWeeks, type CourseWeek } from "@/lib/courseCatalog";
+import { describe, expect, it } from "vitest";
+import { getCourseCatalog, getSourceText, resolveGenerationScope, toPublicCourseWeeks, type CourseWeek } from "@/lib/courseCatalog";
 
 function week(overrides: Partial<CourseWeek> = {}): CourseWeek {
   return {
@@ -18,66 +18,68 @@ function week(overrides: Partial<CourseWeek> = {}): CourseWeek {
 }
 
 describe("toPublicCourseWeeks", () => {
-  it("offers the full catalog topic list for a week with indexed documents, not just heading matches", () => {
+  it("offers the full catalog topic list for a week with source documents", () => {
     const [publicWeek] = toPublicCourseWeeks([week()]);
     expect(publicWeek.topics).toEqual(["Sanatana Dharma", "Dharma", "Vedas"]);
   });
 
-  it("excludes a week entirely when it has zero indexed documents", () => {
+  it("excludes a week entirely when it has zero source documents", () => {
     const publicWeeks = toPublicCourseWeeks([week({ sourceDocuments: [] })]);
     expect(publicWeeks).toEqual([]);
   });
 });
 
-describe("resolveSourceSelection", () => {
-  it("scopes to the matching document when a topic matches a heading", () => {
-    const { sourceIds } = resolveSourceSelection([week()], ["week-1"], ["Sanatana Dharma"]);
-    expect(sourceIds).toEqual(["doc-1"]);
+describe("resolveGenerationScope", () => {
+  it("scopes to the matching topic when a topic filter is given", () => {
+    const { topics } = resolveGenerationScope([week()], ["week-1"], ["Sanatana Dharma"]);
+    expect(topics).toEqual(["Sanatana Dharma"]);
   });
 
-  it("matches headings case-insensitively and trims whitespace", () => {
-    const { sourceIds } = resolveSourceSelection([week()], ["week-1"], [" sanatana dharma "]);
-    expect(sourceIds).toEqual(["doc-1"]);
+  it("matches topics case-insensitively and trims whitespace", () => {
+    const { topics } = resolveGenerationScope([week()], ["week-1"], [" sanatana dharma "]);
+    expect(topics).toEqual(["Sanatana Dharma"]);
   });
 
-  it("falls back to the week's full document set when the topic isn't a literal heading, instead of an empty scope", () => {
-    const { sourceIds } = resolveSourceSelection([week()], ["week-1"], ["Dharma"]);
-    expect(sourceIds).toEqual(["doc-1"]);
+  it("falls back to the week's full topic list when the filter matches nothing, instead of an empty scope", () => {
+    const { topics } = resolveGenerationScope([week()], ["week-1"], ["Something not in this week"]);
+    expect(topics).toEqual(["Sanatana Dharma", "Dharma", "Vedas"]);
   });
 
-  it("still excludes a week that has no indexed documents at all", () => {
-    const { sourceIds } = resolveSourceSelection([week({ sourceDocuments: [] })], ["week-1"], ["Dharma"]);
-    expect(sourceIds).toEqual([]);
+  it("returns no topics for a week id that isn't in the catalog", () => {
+    const { topics } = resolveGenerationScope([week()], ["week-99"], null);
+    expect(topics).toEqual([]);
+  });
+
+  it("joins labels with '+' when multiple weeks are selected", () => {
+    const weekTwo = week({ id: "week-2", label: "Week 2", topics: ["Bhagavan"] });
+    const { coverageLabel } = resolveGenerationScope([week(), weekTwo], ["week-1", "week-2"], null);
+    expect(coverageLabel).toBe("Week 1 + Week 2");
   });
 });
 
 describe("getCourseCatalog", () => {
-  const originalEnv = process.env.QUIZ_GENERATOR_API_URL;
+  it("reads weeks/topics/source documents straight from the bundled catalog", async () => {
+    const weeks = await getCourseCatalog();
+    const weekOne = weeks.find((w) => w.id === "week-1");
+    expect(weekOne?.label).toBe("Week 1");
+    expect(weekOne?.topics).toContain("Sanatana Dharma");
+    expect(weekOne?.sourceDocuments.length).toBeGreaterThan(0);
+  });
+});
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    process.env.QUIZ_GENERATOR_API_URL = originalEnv;
+describe("getSourceText", () => {
+  it("returns an empty string when none of a week's source documents have extracted text", () => {
+    expect(getSourceText([week()], ["week-1"])).toBe("");
   });
 
-  it("resolves a document whose indexed source_file differs only by '+' vs space and by case", async () => {
-    process.env.QUIZ_GENERATOR_API_URL = "https://example.test/api/quiz/generate";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            knowledge_base: {
-              sources: [{ id: "week-4-eng-sb-course-2-pdf-abc123", source_file: "week+4-eng-sb+course+2+pdf.pdf" }],
-            },
-          }),
-          { status: 200 }
-        )
-      )
-    );
+  it("returns an empty string for a week id that isn't in the catalog", () => {
+    expect(getSourceText([week()], ["week-99"])).toBe("");
+  });
 
+  it("includes the real week's course-note text when it's actually bundled", async () => {
     const weeks = await getCourseCatalog();
-    const week4 = weeks.find((week) => week.id === "week-4");
-    const notesDoc = week4?.sourceDocuments.find((doc) => doc.name === "Week 4-ENG-SB Course 2 PDF.pdf");
-    expect(notesDoc?.id).toBe("week-4-eng-sb-course-2-pdf-abc123");
+    const text = getSourceText(weeks, ["week-1"]);
+    expect(text).toContain("Sanatana Dharma");
+    expect(text.length).toBeGreaterThan(100);
   });
 });

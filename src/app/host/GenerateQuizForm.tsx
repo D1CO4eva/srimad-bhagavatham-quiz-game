@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import type { PublicCourseWeek } from "@/lib/courseCatalog";
-import type { GenerationProgress } from "@/lib/quizGenerator";
+import type { GenerationProgress } from "@/lib/localQuizGenerator";
 import { extractSseFrames, parseSseFrame } from "@/lib/sse";
 
 const QUESTION_COUNTS = [5, 8, 10, 15, 20, 25, 30, 35] as const;
