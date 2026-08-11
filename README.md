@@ -49,7 +49,11 @@ npm run docker:down
 The host generates quizzes from `/host` by picking a class week (or several)
 and topic(s) — RAG retrieval over Bhagavatam course-note markdowns happens in
 the separate `GOD-Auth-Service` repo (`POST /api/quiz/generate`), scoped to
-the selected week/topic via a static catalog (`COURSE_CATALOG_URL`). This app
+the selected week/topic via this app's own catalog (`src/data/courseCatalog.json`,
+regenerated with `python scripts/build_course_catalog.py` from
+`course-materials/raw/` — see that script's docstring). It's cross-referenced
+at request time against GOD-Auth-Service's `/api/quiz/health` to resolve the
+ids its RAG pipeline actually indexed the same documents under. This app
 owns its own `Quiz`/`Question` tables — a generated quiz is saved as a draft,
 previewed, and Published before it can be turned into a live session.
 `/host` itself sits behind a shared passcode (`HOST_PASSCODE`).
@@ -78,9 +82,10 @@ never share credentials.
 6. **`SESSION_SECRET`**: signs the host's session cookie. Generate a fresh
    one for prod (`openssl rand -base64 32`) — do not reuse the local dev
    value.
-7. **`QUIZ_GENERATOR_API_URL`** / **`COURSE_CATALOG_URL`**: the defaults in
-   `.env.example` point at GOD-Auth-Service's public deployment and its
-   course catalog — only override if pointing at a different one.
+7. **`QUIZ_GENERATOR_API_URL`**: the default in `.env.example` points at
+   GOD-Auth-Service's public deployment — only override if pointing at a
+   different one. The course catalog itself ships inside this app
+   (`src/data/courseCatalog.json`); there's no separate URL to configure.
 8. Deploy the Next.js app itself anywhere that supports it (Vercel is the
    path of least resistance for this stack — git push, no server to manage).
    HTTPS/WSS is automatic on Vercel and most other platforms; Ably's client
