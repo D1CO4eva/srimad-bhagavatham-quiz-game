@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { MIN_TIME_LIMIT_SECS, MAX_TIME_LIMIT_SECS } from "@/lib/timeLimits";
 
 export async function PATCH(
   request: Request,
@@ -23,7 +24,7 @@ export async function PATCH(
     return Response.json({ error: "Only draft quizzes can be edited." }, { status: 400 });
   }
 
-  const data: { choices?: string[]; answer?: string } = {};
+  const data: { choices?: string[]; answer?: string; timeLimitSecs?: number } = {};
 
   if (body?.choices !== undefined) {
     if (question.type !== "MULTIPLE_CHOICE") {
@@ -52,6 +53,21 @@ export async function PATCH(
     data.answer = answer;
   }
 
+  if (body?.timeLimitSecs !== undefined) {
+    const timeLimitSecs = Number(body.timeLimitSecs);
+    if (
+      !Number.isInteger(timeLimitSecs) ||
+      timeLimitSecs < MIN_TIME_LIMIT_SECS ||
+      timeLimitSecs > MAX_TIME_LIMIT_SECS
+    ) {
+      return Response.json(
+        { error: `timeLimitSecs must be an integer between ${MIN_TIME_LIMIT_SECS} and ${MAX_TIME_LIMIT_SECS}.` },
+        { status: 400 }
+      );
+    }
+    data.timeLimitSecs = timeLimitSecs;
+  }
+
   if (Object.keys(data).length === 0) {
     return Response.json({ error: "Nothing to update." }, { status: 400 });
   }
@@ -59,7 +75,7 @@ export async function PATCH(
   const updated = await db.question.update({
     where: { id: questionId },
     data,
-    select: { id: true, type: true, question: true, choices: true, answer: true },
+    select: { id: true, type: true, question: true, choices: true, answer: true, timeLimitSecs: true },
   });
 
   return Response.json(updated);

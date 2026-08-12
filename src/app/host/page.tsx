@@ -18,7 +18,14 @@ export default async function HostPage() {
         title: true,
         questions: {
           orderBy: { order: "asc" },
-          select: { id: true, type: true, question: true, choices: true, answer: true },
+          select: {
+            id: true,
+            type: true,
+            question: true,
+            choices: true,
+            answer: true,
+            timeLimitSecs: true,
+          },
         },
       },
     }),

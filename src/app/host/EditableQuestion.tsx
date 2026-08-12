@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { MIN_TIME_LIMIT_SECS, MAX_TIME_LIMIT_SECS } from "@/lib/timeLimits";
 
 type Question = {
   id: string;
@@ -8,6 +9,7 @@ type Question = {
   question: string;
   choices: string[];
   answer: string;
+  timeLimitSecs: number;
 };
 
 export function EditableQuestion({
@@ -19,18 +21,27 @@ export function EditableQuestion({
   quizId: string;
   question: Question;
   index: number;
-  onSaved: (updated: { choices: string[]; answer: string }) => void;
+  onSaved: (updated: { choices: string[]; answer: string; timeLimitSecs: number }) => void;
 }) {
   const [savedChoices, setSavedChoices] = useState(question.choices);
   const [savedAnswer, setSavedAnswer] = useState(question.answer);
+  const [savedTimeLimitSecs, setSavedTimeLimitSecs] = useState(question.timeLimitSecs);
   const [choices, setChoices] = useState(question.choices);
   const [answer, setAnswer] = useState(question.answer);
+  const [timeLimitSecs, setTimeLimitSecs] = useState(question.timeLimitSecs);
   const [isSaving, setIsSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const editableChoiceText = question.type === "MULTIPLE_CHOICE";
-  const dirty = answer !== savedAnswer || choices.some((choice, i) => choice !== savedChoices[i]);
+  const timeLimitValid =
+    Number.isInteger(timeLimitSecs) &&
+    timeLimitSecs >= MIN_TIME_LIMIT_SECS &&
+    timeLimitSecs <= MAX_TIME_LIMIT_SECS;
+  const dirty =
+    answer !== savedAnswer ||
+    timeLimitSecs !== savedTimeLimitSecs ||
+    choices.some((choice, i) => choice !== savedChoices[i]);
 
   function updateChoiceText(choiceIndex: number, value: string) {
     setError(null);
@@ -47,12 +58,16 @@ export function EditableQuestion({
   }
 
   async function handleSave() {
+    if (!timeLimitValid) {
+      setError(`Time limit must be between ${MIN_TIME_LIMIT_SECS} and ${MAX_TIME_LIMIT_SECS} seconds.`);
+      return;
+    }
     setIsSaving(true);
     setError(null);
     try {
-      const body: { choices?: string[]; answer: string } = editableChoiceText
-        ? { choices, answer }
-        : { answer };
+      const body: { choices?: string[]; answer: string; timeLimitSecs: number } = editableChoiceText
+        ? { choices, answer, timeLimitSecs }
+        : { answer, timeLimitSecs };
       const response = await fetch(`/api/quizzes/${quizId}/questions/${question.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -62,10 +77,12 @@ export function EditableQuestion({
       if (!response.ok) throw new Error(data.error ?? "Could not save this question.");
       setChoices(data.choices);
       setAnswer(data.answer);
+      setTimeLimitSecs(data.timeLimitSecs);
       setSavedChoices(data.choices);
       setSavedAnswer(data.answer);
+      setSavedTimeLimitSecs(data.timeLimitSecs);
       setJustSaved(true);
-      onSaved({ choices: data.choices, answer: data.answer });
+      onSaved({ choices: data.choices, answer: data.answer, timeLimitSecs: data.timeLimitSecs });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save this question.");
     } finally {
@@ -106,6 +123,22 @@ export function EditableQuestion({
           </li>
         ))}
       </ul>
+      <label className="mt-3 flex items-center gap-2 text-xs text-ink-soft">
+        Time limit
+        <input
+          type="number"
+          min={MIN_TIME_LIMIT_SECS}
+          max={MAX_TIME_LIMIT_SECS}
+          value={timeLimitSecs}
+          onChange={(event) => {
+            setTimeLimitSecs(Number(event.target.value));
+            setError(null);
+            setJustSaved(false);
+          }}
+          className="input-field w-20"
+        />
+        seconds
+      </label>
       <div className="mt-3 flex items-center gap-3">
         <button
           type="button"
@@ -113,7 +146,7 @@ export function EditableQuestion({
           disabled={!dirty || isSaving}
           className="btn btn-secondary"
         >
-          {isSaving ? "Saving…" : "Save answer"}
+          {isSaving ? "Saving…" : "Save"}
         </button>
         {justSaved && !dirty && <span className="text-xs font-semibold text-success">Saved</span>}
         {error && <span className="text-xs text-danger">{error}</span>}
