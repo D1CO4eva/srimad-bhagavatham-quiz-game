@@ -1,7 +1,7 @@
 import { redis } from "@/lib/redis";
 import { db } from "@/lib/db";
 import { publishToSession } from "@/lib/ably";
-import { SessionEvent } from "@/lib/events";
+import { SessionEvent, type LeaderboardEntry as PublicLeaderboardEntry } from "@/lib/events";
 
 const TOP_N = 5;
 const PODIUM_SIZE = 3;
@@ -70,9 +70,9 @@ export async function publishLeaderboardUpdate(pin: string): Promise<void> {
  * rows (so standings survive Redis eventually expiring the key), marks the
  * session COMPLETED, and broadcasts the top-3 podium (Story 5.3).
  */
-export async function finalizeSession(pin: string): Promise<void> {
+export async function finalizeSession(pin: string): Promise<PublicLeaderboardEntry[]> {
   const session = await db.gameSession.findFirst({ where: { pin }, select: { id: true } });
-  if (!session) return;
+  if (!session) return [];
 
   const full = await withNicknames(await getTopN(pin, "all"));
 
@@ -96,5 +96,7 @@ export async function finalizeSession(pin: string): Promise<void> {
     ),
   ]);
 
-  await publishToSession(pin, SessionEvent.Podium, { podium: full.slice(0, PODIUM_SIZE) });
+  const podium = full.slice(0, PODIUM_SIZE);
+  await publishToSession(pin, SessionEvent.Podium, { podium });
+  return podium;
 }

@@ -6,8 +6,8 @@ export async function POST(
 ) {
   const { pin } = await params;
   try {
-    await endGameSession(pin);
-    return Response.json({ ok: true });
+    const podium = await endGameSession(pin);
+    return Response.json({ ok: true, podium });
   } catch (error) {
     if (error instanceof SessionNotFoundError) {
       return Response.json({ error: error.message }, { status: 404 });

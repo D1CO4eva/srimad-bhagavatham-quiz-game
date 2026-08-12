@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { createSessionRealtimeClient } from "@/lib/ably-client";
 import {
   SessionEvent,
@@ -45,7 +44,6 @@ export function HostLobby({
   initialPlayerCount: number;
   initialPodium: LeaderboardEntry[] | null;
 }) {
-  const router = useRouter();
   const [players, setPlayers] = useState<Player[]>(initialPlayers);
   const [started, setStarted] = useState(initialStarted);
   const [isStarting, setIsStarting] = useState(false);
@@ -177,16 +175,17 @@ export function HostLobby({
   }
 
   async function handleEndGame() {
-    if (!window.confirm("End this game for everyone and go back to drafts?")) return;
+    if (!window.confirm("End this game for everyone and show the final results?")) return;
     setIsEnding(true);
     setError(null);
     try {
       const response = await fetch(`/api/sessions/${pin}/end`, { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not end the game.");
-      router.push("/host");
+      if (data.podium) setPodium(data.podium);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not end the game.");
+    } finally {
       setIsEnding(false);
     }
   }
