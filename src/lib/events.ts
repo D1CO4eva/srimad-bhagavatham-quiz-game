@@ -6,6 +6,7 @@
 export const SessionEvent = {
   PlayerJoined: "player_joined",
   GameStarted: "game_started",
+  QuoteDisplay: "quote_display",
   QuestionStart: "question_start",
   AnswerCountUpdate: "answer_count_update",
   QuestionLocked: "question_locked",
@@ -26,6 +27,11 @@ export type QuestionStartPayload = {
   timeLimitSecs: number;
   startedAt: number | null;
 };
+
+/** Sent right before question_start when the upcoming question has a quote
+ * assigned (see src/lib/swamijiQuotes.ts) — `displayMs` tells clients how
+ * long to hold it up before question_start replaces it. */
+export type QuoteDisplayPayload = { quote: string; attribution: string; displayMs: number };
 
 export type AnswerCountUpdatePayload = { answeredCount: number; playerCount: number };
 /** `answer` is the correct choice's text — safe to reveal now that answering is closed. */

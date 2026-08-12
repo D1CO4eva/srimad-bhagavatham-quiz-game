@@ -11,9 +11,11 @@ import {
   type PodiumPayload,
   type QuestionLockedPayload,
   type QuestionStartPayload,
+  type QuoteDisplayPayload,
 } from "@/lib/events";
 import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_SHAPES } from "@/lib/answerShapes";
+import { QuoteOverlay } from "@/components/QuoteOverlay";
 import type { InboundMessage } from "ably";
 
 type Player = { id: string; nickname: string };
@@ -61,6 +63,7 @@ export function HostLobby({
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
   const [isEnding, setIsEnding] = useState(false);
+  const [activeQuote, setActiveQuote] = useState<QuoteDisplayPayload | null>(null);
 
   const liveRemaining = useCountdown(question?.startedAt ?? null, question?.timeLimitSecs ?? 0);
   // Frozen the instant the question locks (captured in the onQuestionLocked
@@ -97,6 +100,10 @@ export function HostLobby({
       setFrozenRemaining(null);
       setAnsweredCount(0);
       setLeaderboard(null);
+      setActiveQuote(null);
+    };
+    const onQuoteDisplay = (message: InboundMessage) => {
+      setActiveQuote(message.data as QuoteDisplayPayload);
     };
     const onAnswerCountUpdate = (message: InboundMessage) => {
       const data = message.data as AnswerCountUpdatePayload;
@@ -117,6 +124,7 @@ export function HostLobby({
     };
 
     channel.subscribe(SessionEvent.PlayerJoined, onPlayerJoined);
+    channel.subscribe(SessionEvent.QuoteDisplay, onQuoteDisplay);
     channel.subscribe(SessionEvent.QuestionStart, onQuestionStart);
     channel.subscribe(SessionEvent.AnswerCountUpdate, onAnswerCountUpdate);
     channel.subscribe(SessionEvent.QuestionLocked, onQuestionLocked);
@@ -125,6 +133,7 @@ export function HostLobby({
 
     return () => {
       channel.unsubscribe(SessionEvent.PlayerJoined, onPlayerJoined);
+      channel.unsubscribe(SessionEvent.QuoteDisplay, onQuoteDisplay);
       channel.unsubscribe(SessionEvent.QuestionStart, onQuestionStart);
       channel.unsubscribe(SessionEvent.AnswerCountUpdate, onAnswerCountUpdate);
       channel.unsubscribe(SessionEvent.QuestionLocked, onQuestionLocked);
@@ -133,6 +142,15 @@ export function HostLobby({
       client.close();
     };
   }, [pin]);
+
+  // Safety-net auto-clear matching the server's own wait (questions.ts sleeps
+  // for the same displayMs before broadcasting question_start) — covers the
+  // case where that broadcast is ever delayed or dropped.
+  useEffect(() => {
+    if (!activeQuote) return;
+    const timer = setTimeout(() => setActiveQuote(null), activeQuote.displayMs);
+    return () => clearTimeout(timer);
+  }, [activeQuote]);
 
   // Auto-lock once the host's own countdown hits zero, so the UI moves on
   // even if no one clicks "Lock Now". The server deadline is authoritative
@@ -208,6 +226,7 @@ export function HostLobby({
   if (podium) {
     return (
       <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-8 px-6 text-center">
+        {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
         <span className="pill-badge">{quizTitle}</span>
         <h1 className="text-5xl">Final Results</h1>
         <ol className="flex w-full flex-col gap-3">
@@ -230,6 +249,7 @@ export function HostLobby({
   if (started && question) {
     return (
       <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center gap-6 px-6 py-16 text-center">
+        {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
         <span className="pill-badge">
           Question {question.questionIndex + 1} of {questionCount}
         </span>
@@ -291,6 +311,7 @@ export function HostLobby({
 
   return (
     <div className="mx-auto flex min-h-screen max-w-2xl flex-col items-center gap-8 px-6 py-16 text-center">
+      {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
       <div>
         <span className="pill-badge">{quizTitle}</span>
         <p className="mt-3 text-sm text-ink-soft">Join at {joinUrl}</p>
