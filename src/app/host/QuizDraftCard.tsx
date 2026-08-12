@@ -10,6 +10,7 @@ type DraftQuestion = {
   question: string;
   choices: string[];
   answer: string;
+  timeLimitSecs: number;
 };
 
 export function QuizDraftCard({ quiz }: { quiz: { id: string; title: string; questions: DraftQuestion[] } }) {
