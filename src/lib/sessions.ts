@@ -113,6 +113,6 @@ export async function startGameSession(pin: string) {
 export async function endGameSession(pin: string) {
   const session = await db.gameSession.findFirst({ where: { pin }, select: { status: true } });
   if (!session) throw new SessionNotFoundError(pin);
-  if (session.status === "COMPLETED") return;
-  await finalizeSession(pin);
+  if (session.status === "COMPLETED") return null;
+  return finalizeSession(pin);
 }
