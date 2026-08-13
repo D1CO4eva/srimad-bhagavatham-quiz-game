@@ -269,7 +269,7 @@ export function PlayerLobby({
         ) : myChoices.length > 0 ? (
           <p className="pill-badge">Answer locked in!</p>
         ) : locked ? (
-          <p className="pill-badge">Time&apos;s up!</p>
+          <p className="pill-badge">{showTimer ? "Time's up!" : "Locked!"}</p>
         ) : isMultiSelect ? (
           <p className="pill-badge">Select all that apply</p>
         ) : (

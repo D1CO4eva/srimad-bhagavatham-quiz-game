@@ -163,10 +163,11 @@ export class AnswerRejectedError extends Error {
 /**
  * Records and grades a player's answer for the session's current question.
  * Rejects anything after the server-computed deadline regardless of client
- * state (Story 3.3), and rejects a second submission for the same question
- * (Story 3.4 / QA 9.1 rapid-double-submit case). Grading uses only
- * server-received timestamps (Story 4.1) — nothing client-submitted about
- * timing is ever trusted.
+ * state (Story 3.3) — unless the host has the timer off, in which case the
+ * question is free-time and only an explicit lock closes it — and rejects a
+ * second submission for the same question (Story 3.4 / QA 9.1
+ * rapid-double-submit case). Grading uses only server-received timestamps
+ * (Story 4.1) — nothing client-submitted about timing is ever trusted.
  */
 export async function submitAnswer(pin: string, playerId: string, questionId: string, choiceIndices: number[]) {
   const session = await db.gameSession.findFirst({
@@ -190,7 +191,8 @@ export async function submitAnswer(pin: string, playerId: string, questionId: st
     throw new AnswerRejectedError("Answer options aren't open yet.");
   }
   const deadline = revealAt.getTime() + current.timeLimitSecs * 1000;
-  if (current.lockedAt || serverReceivedAt.getTime() > deadline) {
+  const timeExpired = session.showTimer && serverReceivedAt.getTime() > deadline;
+  if (current.lockedAt || timeExpired) {
     throw new AnswerRejectedError("The question is locked.");
   }
   const uniqueIndices = new Set(choiceIndices);

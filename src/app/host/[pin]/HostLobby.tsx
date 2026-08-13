@@ -186,12 +186,14 @@ export function HostLobby({
 
   // Auto-lock once the host's own countdown hits zero, so the UI moves on
   // even if no one clicks "Lock Now". The server deadline is authoritative
-  // either way (Story 3.3).
+  // either way (Story 3.3) — but only when the timer is on. With it off,
+  // this is a free-time question: only "Lock Now" (or Next Question, via
+  // the lock endpoint's own callers) ends it.
   useEffect(() => {
-    if (question && remaining === 0 && !locked) {
+    if (showTimer && question && remaining === 0 && !locked) {
       fetch(`/api/sessions/${pin}/lock`, { method: "POST" }).catch(() => {});
     }
-  }, [remaining, question, pin, locked]);
+  }, [remaining, question, pin, locked, showTimer]);
 
   async function handleStart() {
     setIsStarting(true);
