@@ -39,12 +39,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const existing = await db.quiz.findUnique({ where: { id }, select: { id: true, status: true } });
+  const existing = await db.quiz.findUnique({
+    where: { id },
+    select: { id: true, _count: { select: { gameSessions: true } } },
+  });
   if (!existing) {
     return Response.json({ error: "Quiz not found." }, { status: 404 });
   }
-  if (existing.status !== "DRAFT") {
-    return Response.json({ error: "Only draft quizzes can be deleted." }, { status: 400 });
+  if (existing._count.gameSessions > 0) {
+    return Response.json(
+      { error: "This quiz has game sessions and can't be deleted." },
+      { status: 400 }
+    );
   }
 
   await db.quiz.delete({ where: { id } });
