@@ -16,12 +16,16 @@ export function EditableQuestion({
   quizId,
   question,
   index,
+  canDelete,
   onSaved,
+  onDeleted,
 }: {
   quizId: string;
   question: Question;
   index: number;
+  canDelete: boolean;
   onSaved: (updated: { choices: string[]; answer: string; timeLimitSecs: number }) => void;
+  onDeleted: () => void;
 }) {
   const [savedChoices, setSavedChoices] = useState(question.choices);
   const [savedAnswer, setSavedAnswer] = useState(question.answer);
@@ -30,6 +34,7 @@ export function EditableQuestion({
   const [answer, setAnswer] = useState(question.answer);
   const [timeLimitSecs, setTimeLimitSecs] = useState(question.timeLimitSecs);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,6 +95,23 @@ export function EditableQuestion({
     }
   }
 
+  async function handleDelete() {
+    if (!window.confirm("Delete this question? This can't be undone.")) return;
+    setIsDeleting(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/quizzes/${quizId}/questions/${question.id}`, {
+        method: "DELETE",
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not delete this question.");
+      onDeleted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete this question.");
+      setIsDeleting(false);
+    }
+  }
+
   return (
     <li className="rounded-2xl border border-line p-4 text-sm">
       <p className="font-semibold text-ink">
@@ -147,6 +169,15 @@ export function EditableQuestion({
           className="btn btn-secondary"
         >
           {isSaving ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={isDeleting || !canDelete}
+          title={canDelete ? undefined : "A quiz must have at least one question."}
+          className="btn btn-secondary text-danger"
+        >
+          {isDeleting ? "Deleting…" : "Delete"}
         </button>
         {justSaved && !dirty && <span className="text-xs font-semibold text-success">Saved</span>}
         {error && <span className="text-xs text-danger">{error}</span>}
