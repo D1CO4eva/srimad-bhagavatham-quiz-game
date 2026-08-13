@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { generateUniquePin } from "@/lib/pin";
 import { publishToSession } from "@/lib/ably";
-import { SessionEvent } from "@/lib/events";
+import { SessionEvent, type SettingsUpdatePayload } from "@/lib/events";
 import { toPublicQuestion } from "@/lib/questions";
 import { finalizeSession } from "@/lib/leaderboard";
 
@@ -47,6 +47,9 @@ export async function createGameSession(quizId: string) {
       pin,
       quizId: quiz.id,
       status: "LOBBY",
+      showLeaderboard: quiz.showLeaderboardDefault,
+      showTimer: quiz.showTimerDefault,
+      scoringMode: quiz.scoringMode,
       questions: {
         create: quiz.questions.map((question) => ({
           order: question.order,
@@ -115,4 +118,26 @@ export async function endGameSession(pin: string) {
   if (!session) throw new SessionNotFoundError(pin);
   if (session.status === "COMPLETED") return null;
   return finalizeSession(pin);
+}
+
+/**
+ * Live mid-game override for the leaderboard/timer visibility toggles the
+ * host sees on the question screen — separate from the Quiz's authoring-time
+ * defaults, so flipping this never rewrites the quiz itself.
+ */
+export async function updateSessionSettings(
+  pin: string,
+  settings: Partial<SettingsUpdatePayload>
+) {
+  const session = await db.gameSession.findFirst({ where: { pin }, select: { id: true } });
+  if (!session) throw new SessionNotFoundError(pin);
+
+  const updated = await db.gameSession.update({
+    where: { id: session.id },
+    data: settings,
+    select: { showLeaderboard: true, showTimer: true },
+  });
+
+  await publishToSession(pin, SessionEvent.SettingsUpdate, updated);
+  return updated;
 }

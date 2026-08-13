@@ -11,6 +11,7 @@ export const SessionEvent = {
   QuestionLocked: "question_locked",
   LeaderboardUpdate: "leaderboard_update",
   Podium: "podium",
+  SettingsUpdate: "settings_update",
 } as const;
 
 export type SessionEventName = (typeof SessionEvent)[keyof typeof SessionEvent];
@@ -34,3 +35,6 @@ export type QuestionLockedPayload = { questionId: string; answer: string };
 export type LeaderboardEntry = { playerId: string; nickname: string; points: number; rank: number };
 export type LeaderboardUpdatePayload = { leaderboard: LeaderboardEntry[] };
 export type PodiumPayload = { podium: LeaderboardEntry[] };
+
+/** Broadcast whenever the host flips a live setting mid-game (Story: game settings toggles). */
+export type SettingsUpdatePayload = { showLeaderboard: boolean; showTimer: boolean };

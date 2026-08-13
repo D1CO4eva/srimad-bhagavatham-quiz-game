@@ -65,4 +65,20 @@ describe("computePoints", () => {
     // round(1000 * (1 - (6000/15000)/2)) = round(1000 * (1 - 0.2)) = round(800) = 800
     expect(computePoints(true, 6_000, 15_000)).toBe(800);
   });
+
+  it("defaults to SPEED mode when no mode is passed", () => {
+    expect(computePoints(true, timeLimitMs, timeLimitMs)).toBe(500);
+  });
+
+  describe("ACCURACY mode", () => {
+    it("scores flat BASE_POINTS for a correct answer regardless of speed", () => {
+      expect(computePoints(true, 0, timeLimitMs, "ACCURACY")).toBe(BASE_POINTS);
+      expect(computePoints(true, timeLimitMs, timeLimitMs, "ACCURACY")).toBe(BASE_POINTS);
+    });
+
+    it("scores 0 for an incorrect answer regardless of speed", () => {
+      expect(computePoints(false, 0, timeLimitMs, "ACCURACY")).toBe(0);
+      expect(computePoints(false, timeLimitMs, timeLimitMs, "ACCURACY")).toBe(0);
+    });
+  });
 });

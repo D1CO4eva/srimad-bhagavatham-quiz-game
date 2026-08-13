@@ -4,7 +4,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   const body = await request.json().catch(() => null);
 
-  const data: { title?: string; status?: "PUBLISHED" } = {};
+  const data: {
+    title?: string;
+    status?: "PUBLISHED";
+    showLeaderboardDefault?: boolean;
+    showTimerDefault?: boolean;
+    scoringMode?: "SPEED" | "ACCURACY";
+  } = {};
 
   if (body?.title !== undefined) {
     const title = typeof body.title === "string" ? body.title.trim() : "";
@@ -16,6 +22,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   if (body?.publish === true) {
     data.status = "PUBLISHED";
+  }
+
+  if (typeof body?.showLeaderboardDefault === "boolean") {
+    data.showLeaderboardDefault = body.showLeaderboardDefault;
+  }
+  if (typeof body?.showTimerDefault === "boolean") {
+    data.showTimerDefault = body.showTimerDefault;
+  }
+  if (body?.scoringMode === "SPEED" || body?.scoringMode === "ACCURACY") {
+    data.scoringMode = body.scoringMode;
   }
 
   if (Object.keys(data).length === 0) {

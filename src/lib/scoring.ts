@@ -26,12 +26,24 @@ export function computeTrueReactionTimeMs(
   return Math.min(Math.max(compensated, 0), timeLimitMs);
 }
 
+export type ScoringMode = "SPEED" | "ACCURACY";
+
 /**
  * Kahoot-style linear decay: a correct answer at t=0 scores full
  * BASE_POINTS, decaying to half of BASE_POINTS at t=timeLimit. An incorrect
  * answer always scores 0 (Story 4.3).
+ *
+ * `mode: "ACCURACY"` ignores reaction time entirely — flat BASE_POINTS for
+ * correct, 0 for incorrect — for hosts who'd rather rank by correctness
+ * alone than reward speed.
  */
-export function computePoints(correct: boolean, trueReactionTimeMs: number, timeLimitMs: number): number {
+export function computePoints(
+  correct: boolean,
+  trueReactionTimeMs: number,
+  timeLimitMs: number,
+  mode: ScoringMode = "SPEED"
+): number {
   if (!correct) return 0;
+  if (mode === "ACCURACY") return BASE_POINTS;
   return Math.round(BASE_POINTS * (1 - trueReactionTimeMs / timeLimitMs / 2));
 }

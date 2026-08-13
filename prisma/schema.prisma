@@ -27,6 +27,13 @@ enum QuizStatus {
   PUBLISHED
 }
 
+enum ScoringMode {
+  /// Kahoot-style time-decay points (the original/default behavior).
+  SPEED
+  /// Flat BASE_POINTS per correct answer, speed ignored.
+  ACCURACY
+}
+
 /// A quiz authored/generated ahead of time. Editable — live sessions snapshot
 /// their own frozen copy of questions at creation time (see GameSessionQuestion).
 model Quiz {
@@ -38,6 +45,12 @@ model Quiz {
   status      QuizStatus @default(DRAFT)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+
+  /// Authoring-time defaults, copied onto GameSession when a session is
+  /// created from this quiz; the host can still override live per-session.
+  showLeaderboardDefault Boolean     @default(true)
+  showTimerDefault       Boolean     @default(true)
+  scoringMode            ScoringMode @default(SPEED)
 
   questions    Question[]
   gameSessions GameSession[]
@@ -74,6 +87,12 @@ model GameSession {
 
   /// Index of the question currently live (-1 before the host advances past the lobby).
   currentQuestionIndex Int @default(-1)
+
+  /// Copied from Quiz at creation time; the host can flip these live via the
+  /// question-screen settings toggle without affecting the Quiz's defaults.
+  showLeaderboard Boolean     @default(true)
+  showTimer       Boolean     @default(true)
+  scoringMode     ScoringMode @default(SPEED)
 
   questions GameSessionQuestion[]
   players   Player[]

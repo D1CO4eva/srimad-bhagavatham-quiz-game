@@ -69,6 +69,8 @@ export default async function HostLobbyPage({
       initialAnsweredCount={current?._count.answers ?? 0}
       initialPlayerCount={session.players.length}
       initialPodium={initialPodium}
+      initialShowLeaderboard={session.showLeaderboard}
+      initialShowTimer={session.showTimer}
     />
   );
 }

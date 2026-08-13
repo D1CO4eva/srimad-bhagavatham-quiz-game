@@ -16,6 +16,9 @@ export default async function HostPage() {
       select: {
         id: true,
         title: true,
+        showLeaderboardDefault: true,
+        showTimerDefault: true,
+        scoringMode: true,
         questions: {
           orderBy: { order: "asc" },
           select: {
