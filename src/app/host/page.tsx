@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
-import { StartGameButton } from "./StartGameButton";
 import { GenerateQuizForm } from "./GenerateQuizForm";
 import { QuizDraftCard } from "./QuizDraftCard";
+import { PublishedQuizCard } from "./PublishedQuizCard";
 import { getCourseCatalog, toPublicCourseWeeks } from "@/lib/courseCatalog";
 import { logoutHostAction } from "./login/actions";
 
@@ -77,16 +77,10 @@ export default async function HostPage() {
         ) : (
           <ul className="mt-3 flex flex-col gap-3">
             {published.map((quiz) => (
-              <li key={quiz.id} className="card flex items-center justify-between gap-4 p-5">
-                <div>
-                  <p className="font-serif text-xl text-brand-ink">{quiz.title}</p>
-                  <p className="text-sm text-ink-soft">
-                    {quiz._count.questions} question
-                    {quiz._count.questions === 1 ? "" : "s"}
-                  </p>
-                </div>
-                <StartGameButton quizId={quiz.id} />
-              </li>
+              <PublishedQuizCard
+                key={quiz.id}
+                quiz={{ id: quiz.id, title: quiz.title, questionCount: quiz._count.questions }}
+              />
             ))}
           </ul>
         )}
