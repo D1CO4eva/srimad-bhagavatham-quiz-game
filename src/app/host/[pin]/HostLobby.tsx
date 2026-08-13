@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { createSessionRealtimeClient } from "@/lib/ably-client";
 import {
   SessionEvent,
@@ -284,6 +285,7 @@ export function HostLobby({
         {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
         <span className="pill-badge">{quizTitle}</span>
         <h1 className="text-5xl">Final Results</h1>
+        <p className="pill-badge">Game has ended</p>
         <ol className="flex w-full flex-col gap-3">
           {podium.map((entry) => (
             <li key={entry.playerId} className="card flex items-center justify-between gap-4 px-6 py-5">
@@ -296,7 +298,9 @@ export function HostLobby({
           ))}
         </ol>
         {error && <p className="text-sm text-danger">{error}</p>}
-        {endGameButton}
+        <Link href="/host" className="btn btn-primary">
+          Go back to home page
+        </Link>
       </div>
     );
   }
