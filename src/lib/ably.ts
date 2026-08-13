@@ -23,12 +23,22 @@ export function sessionChannelName(pin: string): string {
   return `game:${pin}`;
 }
 
-/** Publishes a named event to every client (players + host) subscribed to a session's channel. */
+/**
+ * Publishes a named event to every client (players + host) subscribed to a
+ * session's channel. Never throws: by the time anything calls this, the
+ * actual state change (DB write, score update, session finalization) has
+ * already succeeded, and a broadcast hiccup — e.g. Ably's per-channel
+ * publish-rate limit — must not fail the request or strand the session.
+ */
 export async function publishToSession(
   pin: string,
   eventName: string,
   data: unknown
 ): Promise<void> {
   const channel = getAblyRest().channels.get(sessionChannelName(pin));
-  await channel.publish(eventName, data);
+  try {
+    await channel.publish(eventName, data);
+  } catch (error) {
+    console.error(`Ably publish failed for ${sessionChannelName(pin)}/${eventName}:`, error);
+  }
 }

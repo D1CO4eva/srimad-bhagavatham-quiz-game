@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { redis } from "@/lib/redis";
 import { publishToSession } from "@/lib/ably";
 import { SessionEvent, type QuestionStartPayload } from "@/lib/events";
 import {
@@ -137,6 +138,21 @@ export async function lockCurrentQuestion(pin: string) {
   }
 }
 
+const ANSWER_COUNT_THROTTLE_MS = 300;
+
+/**
+ * At most one answer_count_update broadcast per session every 300ms. Without
+ * this, a burst of answers landing in the same second (everyone tapping just
+ * before the deadline) publishes once per answer on one Ably channel, which
+ * blows past Ably's per-channel publish-rate limit. A Redis NX lock makes
+ * the throttle hold across Cloud Run instances, not just within one.
+ */
+async function shouldPublishAnswerCountUpdate(pin: string): Promise<boolean> {
+  const key = `game:${pin}:answer-count-throttle`;
+  const acquired = await redis.set(key, "1", "PX", ANSWER_COUNT_THROTTLE_MS, "NX");
+  return acquired === "OK";
+}
+
 export class AnswerRejectedError extends Error {
   constructor(message: string) {
     super(message);
@@ -227,5 +243,7 @@ export async function submitAnswer(pin: string, playerId: string, questionId: st
 
   const answeredCount = await db.answer.count({ where: { gameSessionQuestionId: current.id } });
   const playerCount = await db.player.count({ where: { gameSessionId: session.id } });
-  await publishToSession(pin, SessionEvent.AnswerCountUpdate, { answeredCount, playerCount });
+  if (await shouldPublishAnswerCountUpdate(pin)) {
+    await publishToSession(pin, SessionEvent.AnswerCountUpdate, { answeredCount, playerCount });
+  }
 }
