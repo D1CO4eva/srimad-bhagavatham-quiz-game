@@ -13,7 +13,18 @@ type DraftQuestion = {
   timeLimitSecs: number;
 };
 
-export function QuizDraftCard({ quiz }: { quiz: { id: string; title: string; questions: DraftQuestion[] } }) {
+export function QuizDraftCard({
+  quiz,
+}: {
+  quiz: {
+    id: string;
+    title: string;
+    questions: DraftQuestion[];
+    showLeaderboardDefault: boolean;
+    showTimerDefault: boolean;
+    scoringMode: "SPEED" | "ACCURACY";
+  };
+}) {
   const router = useRouter();
   const [title, setTitle] = useState(quiz.title);
   const [isSaving, setIsSaving] = useState(false);
@@ -24,8 +35,18 @@ export function QuizDraftCard({ quiz }: { quiz: { id: string; title: string; que
   // Lifted out of EditableQuestion so a saved edit survives collapsing and
   // re-expanding the "Preview questions" panel.
   const [questions, setQuestions] = useState(quiz.questions);
+  const [showLeaderboardDefault, setShowLeaderboardDefault] = useState(quiz.showLeaderboardDefault);
+  const [showTimerDefault, setShowTimerDefault] = useState(quiz.showTimerDefault);
+  const [scoringMode, setScoringMode] = useState(quiz.scoringMode);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
 
-  async function patch(body: { title?: string; publish?: boolean }) {
+  async function patch(body: {
+    title?: string;
+    publish?: boolean;
+    showLeaderboardDefault?: boolean;
+    showTimerDefault?: boolean;
+    scoringMode?: "SPEED" | "ACCURACY";
+  }) {
     const response = await fetch(`/api/quizzes/${quiz.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -58,6 +79,29 @@ export function QuizDraftCard({ quiz }: { quiz: { id: string; title: string; que
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not publish this quiz.");
       setIsPublishing(false);
+    }
+  }
+
+  async function handleSettingsChange(next: {
+    showLeaderboardDefault?: boolean;
+    showTimerDefault?: boolean;
+    scoringMode?: "SPEED" | "ACCURACY";
+  }) {
+    const prev = { showLeaderboardDefault, showTimerDefault, scoringMode };
+    if (next.showLeaderboardDefault !== undefined) setShowLeaderboardDefault(next.showLeaderboardDefault);
+    if (next.showTimerDefault !== undefined) setShowTimerDefault(next.showTimerDefault);
+    if (next.scoringMode !== undefined) setScoringMode(next.scoringMode);
+    setIsSavingSettings(true);
+    setError(null);
+    try {
+      await patch(next);
+    } catch (err) {
+      setShowLeaderboardDefault(prev.showLeaderboardDefault);
+      setShowTimerDefault(prev.showTimerDefault);
+      setScoringMode(prev.scoringMode);
+      setError(err instanceof Error ? err.message : "Could not save that setting.");
+    } finally {
+      setIsSavingSettings(false);
     }
   }
 
@@ -108,6 +152,39 @@ export function QuizDraftCard({ quiz }: { quiz: { id: string; title: string; que
         <button type="button" onClick={() => setExpanded((v) => !v)} className="font-semibold text-brand-ink">
           {expanded ? "Hide questions" : "Preview questions"}
         </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-4 border-t border-line pt-4 text-sm">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={showLeaderboardDefault}
+            disabled={isSavingSettings}
+            onChange={(event) => handleSettingsChange({ showLeaderboardDefault: event.target.checked })}
+          />
+          Show leaderboard
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={showTimerDefault}
+            disabled={isSavingSettings}
+            onChange={(event) => handleSettingsChange({ showTimerDefault: event.target.checked })}
+          />
+          Show timer
+        </label>
+        <label className="flex items-center gap-2">
+          Scoring:
+          <select
+            value={scoringMode}
+            disabled={isSavingSettings}
+            onChange={(event) => handleSettingsChange({ scoringMode: event.target.value as "SPEED" | "ACCURACY" })}
+            className="input-field w-auto py-1"
+          >
+            <option value="SPEED">Speed (faster = more points)</option>
+            <option value="ACCURACY">Accuracy only (correct = full points)</option>
+          </select>
+        </label>
       </div>
 
       {expanded && (

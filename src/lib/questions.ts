@@ -151,7 +151,7 @@ export async function submitAnswer(pin: string, playerId: string, questionId: st
     timeLimitMs
   );
   const correct = current.choices[choiceIndex] === current.answer;
-  const points = computePoints(correct, trueReactionTimeMs, timeLimitMs);
+  const points = computePoints(correct, trueReactionTimeMs, timeLimitMs, session.scoringMode);
 
   try {
     await db.answer.create({

@@ -10,6 +10,7 @@ import {
   type PodiumPayload,
   type QuestionLockedPayload,
   type QuestionStartPayload,
+  type SettingsUpdatePayload,
 } from "@/lib/events";
 import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_SHAPES } from "@/lib/answerShapes";
@@ -32,6 +33,8 @@ export function HostLobby({
   initialAnsweredCount,
   initialPlayerCount,
   initialPodium,
+  initialShowLeaderboard,
+  initialShowTimer,
 }: {
   pin: string;
   quizTitle: string;
@@ -44,6 +47,8 @@ export function HostLobby({
   initialAnsweredCount: number;
   initialPlayerCount: number;
   initialPodium: LeaderboardEntry[] | null;
+  initialShowLeaderboard: boolean;
+  initialShowTimer: boolean;
 }) {
   const [players, setPlayers] = useState<Player[]>(initialPlayers);
   const [started, setStarted] = useState(initialStarted);
@@ -60,6 +65,9 @@ export function HostLobby({
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
   const [isEnding, setIsEnding] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(initialShowLeaderboard);
+  const [showTimer, setShowTimer] = useState(initialShowTimer);
+  const [isTogglingSettings, setIsTogglingSettings] = useState(false);
 
   const liveRemaining = useCountdown(question?.startedAt ?? null, question?.timeLimitSecs ?? 0);
   // Frozen the instant the question locks (captured in the onQuestionLocked
@@ -114,6 +122,11 @@ export function HostLobby({
     const onPodium = (message: InboundMessage) => {
       setPodium((message.data as PodiumPayload).podium);
     };
+    const onSettingsUpdate = (message: InboundMessage) => {
+      const data = message.data as SettingsUpdatePayload;
+      setShowLeaderboard(data.showLeaderboard);
+      setShowTimer(data.showTimer);
+    };
 
     channel.subscribe(SessionEvent.PlayerJoined, onPlayerJoined);
     channel.subscribe(SessionEvent.QuestionStart, onQuestionStart);
@@ -121,6 +134,7 @@ export function HostLobby({
     channel.subscribe(SessionEvent.QuestionLocked, onQuestionLocked);
     channel.subscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
     channel.subscribe(SessionEvent.Podium, onPodium);
+    channel.subscribe(SessionEvent.SettingsUpdate, onSettingsUpdate);
 
     return () => {
       channel.unsubscribe(SessionEvent.PlayerJoined, onPlayerJoined);
@@ -129,6 +143,7 @@ export function HostLobby({
       channel.unsubscribe(SessionEvent.QuestionLocked, onQuestionLocked);
       channel.unsubscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
       channel.unsubscribe(SessionEvent.Podium, onPodium);
+      channel.unsubscribe(SessionEvent.SettingsUpdate, onSettingsUpdate);
       client.close();
     };
   }, [pin]);
@@ -173,6 +188,26 @@ export function HostLobby({
 
   async function handleLock() {
     await fetch(`/api/sessions/${pin}/lock`, { method: "POST" }).catch(() => {});
+  }
+
+  async function handleToggleSetting(setting: "showLeaderboard" | "showTimer") {
+    const next = setting === "showLeaderboard" ? !showLeaderboard : !showTimer;
+    setIsTogglingSettings(true);
+    try {
+      const response = await fetch(`/api/sessions/${pin}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [setting]: next }),
+      });
+      if (response.ok) {
+        if (setting === "showLeaderboard") setShowLeaderboard(next);
+        else setShowTimer(next);
+      }
+    } catch {
+      // Ably's SettingsUpdate broadcast is the fallback source of truth if this request fails.
+    } finally {
+      setIsTogglingSettings(false);
+    }
   }
 
   async function handleEndGame() {
@@ -230,11 +265,33 @@ export function HostLobby({
   if (started && question) {
     return (
       <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center gap-6 px-6 py-16 text-center">
-        <span className="pill-badge">
-          Question {question.questionIndex + 1} of {questionCount}
-        </span>
+        <div className="flex w-full items-center justify-between gap-3">
+          <span className="pill-badge">
+            Question {question.questionIndex + 1} of {questionCount}
+          </span>
+          <div className="flex items-center gap-3 text-xs font-semibold text-ink-soft">
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={showLeaderboard}
+                disabled={isTogglingSettings}
+                onChange={() => handleToggleSetting("showLeaderboard")}
+              />
+              Leaderboard
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={showTimer}
+                disabled={isTogglingSettings}
+                onChange={() => handleToggleSetting("showTimer")}
+              />
+              Timer
+            </label>
+          </div>
+        </div>
         <h1 className="max-w-2xl text-4xl">{question.question}</h1>
-        <p className="font-serif text-6xl font-bold text-brand">{remaining}</p>
+        {showTimer && <p className="font-serif text-6xl font-bold text-brand">{remaining}</p>}
         <ul className="grid w-full grid-cols-2 gap-3">
           {question.choices.map((choice, index) => {
             const isCorrect = revealedAnswer !== null && choice === revealedAnswer;
@@ -261,7 +318,7 @@ export function HostLobby({
           {answeredCount} / {playerCount} answered
         </p>
 
-        {locked && leaderboard && (
+        {showLeaderboard && locked && leaderboard && (
           <div className="w-full max-w-sm">
             <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Top 5</p>
             <ol className="flex flex-col gap-2">

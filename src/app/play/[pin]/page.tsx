@@ -79,6 +79,8 @@ export default async function PlayPage({
       initialLocked={initialLocked}
       initialMyChoice={initialMyChoice}
       initialRevealedAnswer={initialRevealedAnswer}
+      initialShowLeaderboard={gameSession.showLeaderboard}
+      initialShowTimer={gameSession.showTimer}
     />
   );
 }

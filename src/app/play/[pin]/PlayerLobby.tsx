@@ -9,6 +9,7 @@ import {
   type PodiumPayload,
   type QuestionLockedPayload,
   type QuestionStartPayload,
+  type SettingsUpdatePayload,
 } from "@/lib/events";
 import { measureLatency } from "@/lib/latency";
 import { useCountdown } from "@/lib/useCountdown";
@@ -30,6 +31,8 @@ export function PlayerLobby({
   initialLocked,
   initialMyChoice,
   initialRevealedAnswer,
+  initialShowLeaderboard,
+  initialShowTimer,
 }: {
   pin: string;
   playerId: string;
@@ -40,6 +43,8 @@ export function PlayerLobby({
   initialLocked: boolean;
   initialMyChoice: number | null;
   initialRevealedAnswer: string | null;
+  initialShowLeaderboard: boolean;
+  initialShowTimer: boolean;
 }) {
   const [gameStarted, setGameStarted] = useState(initialGameStarted);
   const [question, setQuestion] = useState<QuestionStartPayload | null>(initialQuestion);
@@ -50,6 +55,8 @@ export function PlayerLobby({
   const [myRank, setMyRank] = useState<{ rank: number; points: number } | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
+  const [showLeaderboard, setShowLeaderboard] = useState(initialShowLeaderboard);
+  const [showTimer, setShowTimer] = useState(initialShowTimer);
 
   const remaining = useCountdown(question?.startedAt ?? null, question?.timeLimitSecs ?? 0);
 
@@ -85,12 +92,18 @@ export function PlayerLobby({
     const onPodium = (message: InboundMessage) => {
       setPodium((message.data as PodiumPayload).podium);
     };
+    const onSettingsUpdate = (message: InboundMessage) => {
+      const data = message.data as SettingsUpdatePayload;
+      setShowLeaderboard(data.showLeaderboard);
+      setShowTimer(data.showTimer);
+    };
 
     channel.subscribe(SessionEvent.GameStarted, onGameStarted);
     channel.subscribe(SessionEvent.QuestionStart, onQuestionStart);
     channel.subscribe(SessionEvent.QuestionLocked, onQuestionLocked);
     channel.subscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
     channel.subscribe(SessionEvent.Podium, onPodium);
+    channel.subscribe(SessionEvent.SettingsUpdate, onSettingsUpdate);
 
     return () => {
       channel.unsubscribe(SessionEvent.GameStarted, onGameStarted);
@@ -98,6 +111,7 @@ export function PlayerLobby({
       channel.unsubscribe(SessionEvent.QuestionLocked, onQuestionLocked);
       channel.unsubscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
       channel.unsubscribe(SessionEvent.Podium, onPodium);
+      channel.unsubscribe(SessionEvent.SettingsUpdate, onSettingsUpdate);
       client.close();
     };
   }, [pin, playerId]);
@@ -182,7 +196,7 @@ export function PlayerLobby({
   if (question) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
-        <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>
+        {showTimer && <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>}
         <h1 className="max-w-md text-2xl">{question.question}</h1>
         {myChoice !== null && submitError ? (
           <p className="pill-badge">{submitError}</p>
@@ -224,7 +238,7 @@ export function PlayerLobby({
             );
           })}
         </div>
-        {locked && leaderboard && (
+        {showLeaderboard && locked && leaderboard && (
           <div className="w-full max-w-sm">
             <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Top 5</p>
             <ol className="flex flex-col gap-2">
@@ -245,7 +259,7 @@ export function PlayerLobby({
             </ol>
           </div>
         )}
-        {locked && myRank && !leaderboard?.some((entry) => entry.playerId === playerId) && (
+        {showLeaderboard && locked && myRank && !leaderboard?.some((entry) => entry.playerId === playerId) && (
           <p className="pill-badge">
             Your rank: #{myRank.rank} &middot; {myRank.points} points
           </p>
