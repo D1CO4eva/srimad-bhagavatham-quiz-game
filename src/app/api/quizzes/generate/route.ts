@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   if (!parsed.ok) {
     return Response.json({ error: parsed.error }, { status: parsed.status });
   }
-  const { questionCount, difficulty, scopeTopics, coverageLabel, sourceText } = parsed.value;
+  const { questionCount, difficulty, scopeTopics, coverageLabel, sourceText, existingQuestions } = parsed.value;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -32,6 +32,7 @@ export async function POST(request: Request) {
           questionCount,
           difficulty,
           coverageLabel,
+          existingQuestions,
           onProgress: (progress: GenerationProgress) => send("progress", progress),
         });
 

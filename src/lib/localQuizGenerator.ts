@@ -30,6 +30,16 @@ const DEFAULT_FALLBACK_MODEL = "google/gemini-2.5-flash";
 const CONCURRENCY = 4;
 const MULTIPLE_CHOICE_RATIO = 0.75;
 const FAITHFULNESS_THRESHOLD = 0.7;
+// Token-overlap (Jaccard) similarity above which a candidate is treated as
+// testing the same underlying fact as an already-used question, even if
+// reworded — catches near-duplicates the LLM's own "avoid list" instruction
+// misses or ignores.
+const DUPLICATE_SIMILARITY_THRESHOLD = 0.6;
+// Cap on how many avoid-list entries get spelled out in the prompt text
+// itself — the programmatic near-duplicate check below still compares
+// against the full list regardless of this cap, since that's free (no
+// extra tokens), only the prompt text needs bounding.
+const MAX_AVOID_QUESTIONS_IN_PROMPT = 25;
 // The whole course-notes corpus is ~70KB (see src/data/courseNotes.json) —
 // comfortably under this even if a host selects every week at once. This is
 // a safety cap against a much larger future corpus, not a normal-path limit.
@@ -66,7 +76,7 @@ export class QuizGenerationError extends Error {
 type Difficulty = "beginner" | "intermediate" | "advanced" | "mixed";
 type EffectiveDifficulty = "beginner" | "intermediate" | "advanced";
 type QuestionType = "multiple_choice" | "true_false";
-type FailureReason = "invalid_json" | "low_faithfulness";
+type FailureReason = "invalid_json" | "low_faithfulness" | "near_duplicate";
 
 const DIFFICULTY_GUIDANCE: Record<EffectiveDifficulty, string> = {
   beginner: "a straightforward recall question testing a clearly stated fact from the topic",
@@ -87,6 +97,37 @@ function pickQuestionType(): QuestionType {
 function clampSourceText(sourceText: string): string {
   if (sourceText.length <= MAX_SOURCE_TEXT_CHARS) return sourceText;
   return sourceText.slice(0, MAX_SOURCE_TEXT_CHARS) + "\n\n[...source truncated...]";
+}
+
+function tokenize(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(Boolean)
+  );
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const token of a) {
+    if (b.has(token)) intersection++;
+  }
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
+/**
+ * Catches "same fact, different wording" duplicates programmatically —
+ * the avoid-list prompt instruction is advisory only and the model doesn't
+ * always follow it, especially across separately-generated quizzes covering
+ * the same source material.
+ */
+export function isNearDuplicate(question: string, avoidQuestions: string[]): boolean {
+  const tokens = tokenize(question);
+  return avoidQuestions.some((existing) => jaccardSimilarity(tokens, tokenize(existing)) >= DUPLICATE_SIMILARITY_THRESHOLD);
 }
 
 function buildSystemPrompt(grounded: boolean): string {
@@ -140,7 +181,7 @@ function buildUserPrompt(params: {
   if (params.avoidQuestions.length > 0) {
     lines.push(
       "Do not test the same underlying fact or claim as any of these already-used questions, even if reworded:",
-      ...params.avoidQuestions.map((q) => `- ${q}`)
+      ...params.avoidQuestions.slice(0, MAX_AVOID_QUESTIONS_IN_PROMPT).map((q) => `- ${q}`)
     );
   }
 
@@ -227,12 +268,17 @@ async function attemptDraft(params: {
   messages: ChatMessage[];
   type: QuestionType;
   sourceText: string;
+  avoidQuestions: string[];
 }): Promise<AttemptResult> {
   const raw = await tryComplete(params.model, params.messages);
   if (!raw) return { ok: false, reason: "invalid_json", raw: null };
 
   const parsed = parseDraft(raw, params.type);
   if (!parsed) return { ok: false, reason: "invalid_json", raw };
+
+  if (isNearDuplicate(parsed.question, params.avoidQuestions)) {
+    return { ok: false, reason: "near_duplicate", raw };
+  }
 
   const claim = `Question: ${parsed.question}\nAnswer: ${parsed.answer}\nExplanation: ${parsed.explanation}`;
   const faithfulness = await scoreFaithfulness(claim, params.sourceText, params.judgeModel);
@@ -248,6 +294,15 @@ function repairPrompt(reason: FailureReason, raw: string): string {
     return (
       `That response was not valid JSON matching the requested shape. Here is what you sent:\n${raw}\n\n` +
       "Respond again with ONLY a corrected JSON object matching the shape above."
+    );
+  }
+  if (reason === "near_duplicate") {
+    return (
+      `Here is what you sent:\n${raw}\n\n` +
+      "That question tests essentially the same underlying fact as one already used, just reworded or " +
+      "reformatted (e.g. asking for the same count/name/date in different phrasing). Write a question " +
+      "about a clearly different fact or claim from the course-note excerpt. Respond again with ONLY the " +
+      "corrected JSON object."
     );
   }
   return (
@@ -292,6 +347,7 @@ async function generateSlot(params: {
     messages,
     type,
     sourceText: params.sourceText,
+    avoidQuestions: params.avoidQuestions,
   });
   if (first.ok) return first.question;
 
@@ -303,6 +359,7 @@ async function generateSlot(params: {
       messages: repairMessages,
       type,
       sourceText: params.sourceText,
+      avoidQuestions: params.avoidQuestions,
     });
     if (second.ok) return second.question;
   }
@@ -313,6 +370,7 @@ async function generateSlot(params: {
     messages,
     type,
     sourceText: params.sourceText,
+    avoidQuestions: params.avoidQuestions,
   });
   return third.ok ? third.question : null;
 }
@@ -324,10 +382,14 @@ export async function generateQuiz(params: {
   difficulty: Difficulty;
   coverageLabel: string;
   onProgress?: (progress: GenerationProgress) => void;
+  /** Questions from prior quizzes on this material — seeds the avoid-list
+   * beyond just this run's own in-batch questions (Story: generation quality). */
+  existingQuestions?: string[];
 }): Promise<GeneratedQuiz> {
   const primaryModel = process.env.OPENROUTER_MODEL_PRIMARY || DEFAULT_PRIMARY_MODEL;
   const fallbackModel = process.env.OPENROUTER_MODEL_FALLBACK || DEFAULT_FALLBACK_MODEL;
   const sourceText = clampSourceText(params.sourceText);
+  const existingQuestions = params.existingQuestions ?? [];
 
   // Round-robin a shuffled topic order across slots (rather than handing
   // every call the same full topic list) so questions spread across the
@@ -345,7 +407,10 @@ export async function generateQuiz(params: {
     async function worker() {
       while (cursor < indices.length) {
         const slotIndex = indices[cursor++];
-        const avoidQuestions = slots.filter((q): q is GeneratedQuestion => q !== null).map((q) => q.question);
+        const avoidQuestions = [
+          ...existingQuestions,
+          ...slots.filter((q): q is GeneratedQuestion => q !== null).map((q) => q.question),
+        ];
         slots[slotIndex] = await generateSlot({
           topics: params.topics,
           focusTopic: focusTopicFor(slotIndex),
