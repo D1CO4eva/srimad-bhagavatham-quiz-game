@@ -56,10 +56,16 @@ body {
   min-height: 100vh;
   color: var(--color-ink);
   font-family: var(--font-sans);
+  /* Corner glows sized relative to the *document* (their default,
+     farthest-corner) fade out well before the bottom of any page taller
+     than one screen, leaving a visible tinted-then-flat seam. Pinning the
+     whole background to the viewport keeps the glow (and the rest of the
+     gradient) identical at every scroll position. */
   background:
     radial-gradient(circle at top right, rgba(255, 212, 88, 0.2), transparent 29%),
     radial-gradient(circle at top left, rgba(89, 102, 194, 0.13), transparent 28%),
     linear-gradient(180deg, #fffaf1 0%, #fbf7ef 58%, #f4eee4 100%);
+  background-attachment: fixed;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
