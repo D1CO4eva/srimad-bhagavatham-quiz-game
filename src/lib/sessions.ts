@@ -4,6 +4,7 @@ import { publishToSession } from "@/lib/ably";
 import { SessionEvent, type SettingsUpdatePayload } from "@/lib/events";
 import { toPublicQuestion } from "@/lib/questions";
 import { finalizeSession } from "@/lib/leaderboard";
+import { buildQuoteAssignment } from "@/lib/swamijiQuotes";
 
 export class QuizNotFoundError extends Error {
   constructor(quizId: string) {
@@ -41,6 +42,9 @@ export async function createGameSession(quizId: string) {
   }
 
   const pin = await generateUniquePin();
+  // Fixed once per session, alongside the rest of the frozen question
+  // snapshot, so a quote's position/text doesn't change if this is re-read.
+  const quoteAssignment = buildQuoteAssignment(quiz.questions.length);
 
   return db.gameSession.create({
     data: {
@@ -60,6 +64,8 @@ export async function createGameSession(quizId: string) {
           correctChoices: question.correctChoices,
           explanation: question.explanation,
           timeLimitSecs: question.timeLimitSecs,
+          quoteText: quoteAssignment.get(question.order)?.quote ?? null,
+          quoteAttribution: quoteAssignment.get(question.order)?.attribution ?? null,
         })),
       },
     },

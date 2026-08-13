@@ -7,6 +7,7 @@
 
 import { getCourseCatalog, resolveGenerationScope, getSourceText } from "@/lib/courseCatalog";
 import { db } from "@/lib/db";
+import type { GeneratedQuestion } from "@/lib/localQuizGenerator";
 
 export const ALLOWED_DIFFICULTIES = new Set(["beginner", "intermediate", "advanced", "mixed"]);
 export const ALLOWED_QUESTION_COUNTS = new Set([5, 8, 10, 15, 20, 25, 30, 35]);
@@ -25,9 +26,9 @@ export type GenerateQuizRequest = {
   scopeTopics: string[];
   coverageLabel: string;
   sourceText: string;
-  /** Prior quizzes' question text, most recent first — seeds generation's
+  /** Prior quizzes' questions, most recent first — seeds generation's
    * duplicate-avoidance beyond just the questions drafted in this one run. */
-  existingQuestions: string[];
+  existingQuestions: GeneratedQuestion[];
 };
 
 export type GenerateQuizRequestResult =
@@ -72,12 +73,24 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
 
   const sourceText = getSourceText(catalog, weekIds);
 
+  // Only MULTIPLE_CHOICE/TRUE_FALSE match what the generator itself ever
+  // produces (and what findDuplicate's answer/choice-overlap check expects)
+  // — MULTI_SELECT/SHORT_ANSWER questions are excluded rather than
+  // shoehorned into that shape.
   const existingQuestionRows = await db.question.findMany({
+    where: { type: { in: ["MULTIPLE_CHOICE", "TRUE_FALSE"] } },
     orderBy: { quiz: { createdAt: "desc" } },
     take: MAX_EXISTING_QUESTIONS_FOR_DEDUP,
-    select: { question: true },
+    select: { id: true, type: true, question: true, choices: true, correctChoices: true },
   });
-  const existingQuestions = existingQuestionRows.map((row) => row.question);
+  const existingQuestions: GeneratedQuestion[] = existingQuestionRows.map((row) => ({
+    id: row.id,
+    type: row.type === "TRUE_FALSE" ? "true_false" : "multiple_choice",
+    question: row.question,
+    choices: row.choices,
+    answer: row.correctChoices[0] ?? "",
+    explanation: "",
+  }));
 
   return {
     ok: true,

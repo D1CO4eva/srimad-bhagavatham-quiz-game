@@ -8,6 +8,11 @@ import {
   computeTrueReactionTimeMs,
 } from "@/lib/scoring";
 import { addPoints, finalizeSession, publishLeaderboardUpdate } from "@/lib/leaderboard";
+import { quoteDisplayDurationMs } from "@/lib/swamijiQuotes";
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class QuestionFlowError extends Error {
   constructor(message: string) {
@@ -42,7 +47,10 @@ export function toPublicQuestion(question: {
 /**
  * Advances a session to its next question (or the first, from the lobby's
  * post-start state) and broadcasts question_start with a server timestamp
- * clients use to sync their countdowns (Story 3.1, 3.3).
+ * clients use to sync their countdowns (Story 3.1, 3.3). If the next
+ * question has a Sri Swamiji quote assigned (src/lib/swamijiQuotes.ts), it's
+ * broadcast first and this waits out its display duration before starting
+ * the question — so the lead-time/answer countdown never ticks during it.
  */
 export async function advanceToNextQuestion(pin: string) {
   const session = await db.gameSession.findFirst({
@@ -54,6 +62,16 @@ export async function advanceToNextQuestion(pin: string) {
   const nextIndex = session.currentQuestionIndex + 1;
   const nextQuestion = session.questions[nextIndex];
   if (!nextQuestion) throw new QuestionFlowError("No more questions in this session.");
+
+  if (nextQuestion.quoteText && nextQuestion.quoteAttribution) {
+    const displayMs = quoteDisplayDurationMs(nextQuestion.quoteText);
+    await publishToSession(pin, SessionEvent.QuoteDisplay, {
+      quote: nextQuestion.quoteText,
+      attribution: nextQuestion.quoteAttribution,
+      displayMs,
+    });
+    await sleep(displayMs);
+  }
 
   const startedAt = new Date();
   const optionsRevealedAt = new Date(startedAt.getTime() + session.leadTimeSecs * 1000);

@@ -154,6 +154,14 @@ model GameSessionQuestion {
   /// 3.3) — this is a UI signal, not the source of truth.
   lockedAt          DateTime?
 
+  /// A Sri Swamiji quote to display for a few seconds right before this
+  /// question starts, assigned once at session creation (3-7 per game,
+  /// scaled by question count — see src/lib/swamijiQuotes.ts). Null on most
+  /// questions; never set on question 0, which starts immediately when the
+  /// host clicks "Start Game".
+  quoteText        String?
+  quoteAttribution String?
+
   answers Answer[]
 
   @@unique([gameSessionId, order])
