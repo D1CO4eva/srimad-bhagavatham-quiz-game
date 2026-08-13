@@ -57,7 +57,7 @@ export async function createGameSession(quizId: string) {
           type: question.type,
           question: question.question,
           choices: question.choices,
-          answer: question.answer,
+          correctChoices: question.correctChoices,
           explanation: question.explanation,
           timeLimitSecs: question.timeLimitSecs,
         })),

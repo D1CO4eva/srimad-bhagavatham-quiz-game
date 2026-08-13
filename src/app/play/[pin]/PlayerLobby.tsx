@@ -29,8 +29,8 @@ export function PlayerLobby({
   initialPodium,
   initialQuestion,
   initialLocked,
-  initialMyChoice,
-  initialRevealedAnswer,
+  initialMyChoices,
+  initialRevealedAnswers,
   initialShowLeaderboard,
   initialShowTimer,
 }: {
@@ -41,22 +41,27 @@ export function PlayerLobby({
   initialPodium: LeaderboardEntry[] | null;
   initialQuestion: QuestionStartPayload | null;
   initialLocked: boolean;
-  initialMyChoice: number | null;
-  initialRevealedAnswer: string | null;
+  initialMyChoices: number[];
+  initialRevealedAnswers: string[] | null;
   initialShowLeaderboard: boolean;
   initialShowTimer: boolean;
 }) {
   const [gameStarted, setGameStarted] = useState(initialGameStarted);
   const [question, setQuestion] = useState<QuestionStartPayload | null>(initialQuestion);
   const [locked, setLocked] = useState(initialLocked);
-  const [revealedAnswer, setRevealedAnswer] = useState<string | null>(initialRevealedAnswer);
-  const [myChoice, setMyChoice] = useState<number | null>(initialMyChoice);
+  const [revealedAnswers, setRevealedAnswers] = useState<string[] | null>(initialRevealedAnswers);
+  // Submitted choices (locks the answer in). Separate from `selectedIndices`
+  // below, which tracks in-progress multi-select taps before submission.
+  const [myChoices, setMyChoices] = useState<number[]>(initialMyChoices);
+  const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [myRank, setMyRank] = useState<{ rank: number; points: number } | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
   const [showLeaderboard, setShowLeaderboard] = useState(initialShowLeaderboard);
   const [showTimer, setShowTimer] = useState(initialShowTimer);
+
+  const isMultiSelect = question?.type === "MULTI_SELECT";
 
   const leadDurationSecs =
     question?.startedAt != null && question?.optionsRevealedAt != null
@@ -82,8 +87,9 @@ export function PlayerLobby({
     const onQuestionStart = (message: InboundMessage) => {
       setQuestion(message.data as QuestionStartPayload);
       setLocked(false);
-      setRevealedAnswer(null);
-      setMyChoice(null);
+      setRevealedAnswers(null);
+      setMyChoices([]);
+      setSelectedIndices([]);
       setSubmitError(null);
       setMyRank(null);
       setLeaderboard(null);
@@ -91,7 +97,7 @@ export function PlayerLobby({
     const onQuestionLocked = (message: InboundMessage) => {
       const data = message.data as QuestionLockedPayload;
       setLocked(true);
-      setRevealedAnswer(data.answer);
+      setRevealedAnswers(data.correctChoices);
     };
     const onLeaderboardUpdate = (message: InboundMessage) => {
       setLeaderboard((message.data as LeaderboardUpdatePayload).leaderboard);
@@ -161,15 +167,15 @@ export function PlayerLobby({
     };
   }, [playerId]);
 
-  async function handleAnswer(choiceIndex: number) {
-    if (myChoice !== null || locked || !question || !optionsVisible) return;
-    setMyChoice(choiceIndex);
+  async function submitChoices(indices: number[]) {
+    if (myChoices.length > 0 || locked || !question || !optionsVisible || indices.length === 0) return;
+    setMyChoices(indices);
     setSubmitError(null);
     try {
       const response = await fetch(`/api/sessions/${pin}/answers`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ playerId, questionId: question.questionId, choiceIndex }),
+        body: JSON.stringify({ playerId, questionId: question.questionId, choiceIndices: indices }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -177,6 +183,21 @@ export function PlayerLobby({
       }
     } catch {
       setSubmitError("Couldn't reach the server — that answer wasn't counted.");
+    }
+  }
+
+  function toggleSelected(index: number) {
+    if (myChoices.length > 0 || locked || !optionsVisible) return;
+    setSelectedIndices((current) =>
+      current.includes(index) ? current.filter((i) => i !== index) : [...current, index]
+    );
+  }
+
+  function handleTileClick(index: number) {
+    if (isMultiSelect) {
+      toggleSelected(index);
+    } else {
+      submitChoices([index]);
     }
   }
 
@@ -201,24 +222,36 @@ export function PlayerLobby({
   }
 
   if (question) {
+    const correctPicks = myChoices.filter(
+      (i) => revealedAnswers !== null && revealedAnswers.includes(question.choices[i])
+    ).length;
+    const isFullyCorrect =
+      revealedAnswers !== null && correctPicks === revealedAnswers.length && myChoices.length === revealedAnswers.length;
+
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
         {showTimer && optionsVisible && <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>}
         <h1 className="max-w-md text-2xl">{question.question}</h1>
         {!optionsVisible ? (
           <p className="pill-badge">Get ready… {leadRemaining}</p>
-        ) : myChoice !== null && submitError ? (
+        ) : myChoices.length > 0 && submitError ? (
           <p className="pill-badge">{submitError}</p>
-        ) : myChoice !== null && locked && revealedAnswer !== null ? (
-          question.choices[myChoice] === revealedAnswer ? (
+        ) : myChoices.length > 0 && locked && revealedAnswers !== null ? (
+          isFullyCorrect ? (
             <p className="pill-badge bg-success-soft text-success">Correct! ✓</p>
+          ) : correctPicks > 0 ? (
+            <p className="pill-badge bg-success-soft text-success">
+              {correctPicks}/{revealedAnswers.length} correct
+            </p>
           ) : (
             <p className="pill-badge bg-danger-soft text-danger">Incorrect ✗</p>
           )
-        ) : myChoice !== null ? (
+        ) : myChoices.length > 0 ? (
           <p className="pill-badge">Answer locked in!</p>
         ) : locked ? (
           <p className="pill-badge">Time&apos;s up!</p>
+        ) : isMultiSelect ? (
+          <p className="pill-badge">Select all that apply</p>
         ) : (
           <p className="pill-badge">Tap your answer</p>
         )}
@@ -226,21 +259,23 @@ export function PlayerLobby({
           <div className="grid w-full max-w-sm grid-cols-2 gap-4">
             {question.choices.map((choice, index) => {
               const shape = ANSWER_SHAPES[index % ANSWER_SHAPES.length];
-              const disabled = myChoice !== null || locked;
-              const isRevealed = revealedAnswer !== null;
-              const isCorrectChoice = isRevealed && choice === revealedAnswer;
+              const disabled = myChoices.length > 0 || locked;
+              const isRevealed = revealedAnswers !== null;
+              const isCorrectChoice = isRevealed && revealedAnswers.includes(choice);
+              const isSelectedPreSubmit = isMultiSelect && myChoices.length === 0 && selectedIndices.includes(index);
               const opacityClass = isRevealed ? (isCorrectChoice ? "" : "opacity-30") : disabled ? "opacity-40" : "";
               return (
                 <button
                   key={index}
                   type="button"
                   disabled={disabled}
-                  onClick={() => handleAnswer(index)}
+                  onClick={() => handleTileClick(index)}
                   className={`flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl px-3 py-4 text-center text-xl font-semibold text-white shadow-lg transition-all duration-500 ${opacityClass} ${
-                    isCorrectChoice ? "ring-4 ring-success" : ""
+                    isCorrectChoice ? "ring-4 ring-success" : isSelectedPreSubmit ? "ring-4 ring-white" : ""
                   }`}
                   style={{ backgroundColor: shape.color }}
                   aria-label={shape.label}
+                  aria-pressed={isMultiSelect ? isSelectedPreSubmit : undefined}
                 >
                   <AnswerShapeIcon label={shape.label} className="h-6 w-6 shrink-0" />
                   <span className="answer-tile-text">{choice}</span>
@@ -248,6 +283,16 @@ export function PlayerLobby({
               );
             })}
           </div>
+        )}
+        {isMultiSelect && optionsVisible && myChoices.length === 0 && (
+          <button
+            type="button"
+            onClick={() => submitChoices(selectedIndices)}
+            disabled={selectedIndices.length === 0}
+            className="btn btn-primary"
+          >
+            Submit Answer
+          </button>
         )}
         {showLeaderboard && locked && leaderboard && (
           <div className="w-full max-w-sm">

@@ -45,17 +45,17 @@ export default async function PlayPage({
   // player back to "waiting" mid-question just because their connection did.
   let initialQuestion: QuestionStartPayload | null = null;
   let initialLocked = false;
-  let initialMyChoice: number | null = null;
-  let initialRevealedAnswer: string | null = null;
+  let initialMyChoices: number[] = [];
+  let initialRevealedAnswers: string[] | null = null;
   if (gameSession.status === "ACTIVE" && current) {
     initialQuestion = toPublicQuestion(current);
     initialLocked = Boolean(current.lockedAt);
-    initialRevealedAnswer = initialLocked ? current.answer : null;
+    initialRevealedAnswers = initialLocked ? current.correctChoices : null;
     const myAnswer = await db.answer.findUnique({
       where: { gameSessionQuestionId_playerId: { gameSessionQuestionId: current.id, playerId } },
-      select: { choiceIndex: true },
+      select: { choiceIndices: true },
     });
-    initialMyChoice = myAnswer?.choiceIndex ?? null;
+    initialMyChoices = myAnswer?.choiceIndices ?? [];
   }
 
   const initialPodium: LeaderboardEntry[] | null =
@@ -77,8 +77,8 @@ export default async function PlayPage({
       initialPodium={initialPodium}
       initialQuestion={initialQuestion}
       initialLocked={initialLocked}
-      initialMyChoice={initialMyChoice}
-      initialRevealedAnswer={initialRevealedAnswer}
+      initialMyChoices={initialMyChoices}
+      initialRevealedAnswers={initialRevealedAnswers}
       initialShowLeaderboard={gameSession.showLeaderboard}
       initialShowTimer={gameSession.showTimer}
     />

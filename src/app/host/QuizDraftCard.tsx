@@ -6,10 +6,10 @@ import { EditableQuestion } from "./EditableQuestion";
 
 type DraftQuestion = {
   id: string;
-  type: "MULTIPLE_CHOICE" | "TRUE_FALSE" | "SHORT_ANSWER";
+  type: "MULTIPLE_CHOICE" | "TRUE_FALSE" | "SHORT_ANSWER" | "MULTI_SELECT";
   question: string;
   choices: string[];
-  answer: string;
+  correctChoices: string[];
   timeLimitSecs: number;
 };
 

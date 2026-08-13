@@ -1,7 +1,12 @@
 import { db } from "@/lib/db";
 import { publishToSession } from "@/lib/ably";
 import { SessionEvent, type QuestionStartPayload } from "@/lib/events";
-import { computePoints, computeRawReactionTimeMs, computeTrueReactionTimeMs } from "@/lib/scoring";
+import {
+  computeCorrectFraction,
+  computePoints,
+  computeRawReactionTimeMs,
+  computeTrueReactionTimeMs,
+} from "@/lib/scoring";
 import { addPoints, finalizeSession, publishLeaderboardUpdate } from "@/lib/leaderboard";
 
 export class QuestionFlowError extends Error {
@@ -93,7 +98,10 @@ export async function lockCurrentQuestion(pin: string) {
       data: { lockedAt: new Date() },
     });
   }
-  await publishToSession(pin, SessionEvent.QuestionLocked, { questionId: current.id, answer: current.answer });
+  await publishToSession(pin, SessionEvent.QuestionLocked, {
+    questionId: current.id,
+    correctChoices: current.correctChoices,
+  });
   await publishLeaderboardUpdate(pin);
 
   const breakdown = await db.answer.groupBy({
@@ -126,7 +134,7 @@ export class AnswerRejectedError extends Error {
  * server-received timestamps (Story 4.1) — nothing client-submitted about
  * timing is ever trusted.
  */
-export async function submitAnswer(pin: string, playerId: string, questionId: string, choiceIndex: number) {
+export async function submitAnswer(pin: string, playerId: string, questionId: string, choiceIndices: number[]) {
   const session = await db.gameSession.findFirst({
     where: { pin, status: "ACTIVE" },
     include: { questions: { orderBy: { order: "asc" } } },
@@ -151,8 +159,14 @@ export async function submitAnswer(pin: string, playerId: string, questionId: st
   if (current.lockedAt || serverReceivedAt.getTime() > deadline) {
     throw new AnswerRejectedError("The question is locked.");
   }
-  if (choiceIndex < 0 || choiceIndex >= current.choices.length) {
-    throw new AnswerRejectedError("choiceIndex is out of range.");
+  const uniqueIndices = new Set(choiceIndices);
+  if (
+    choiceIndices.length === 0 ||
+    uniqueIndices.size !== choiceIndices.length ||
+    choiceIndices.some((i) => i < 0 || i >= current.choices.length) ||
+    (current.type !== "MULTI_SELECT" && choiceIndices.length > 1)
+  ) {
+    throw new AnswerRejectedError("choiceIndices is invalid for this question.");
   }
 
   const player = await db.player.findUnique({
@@ -170,15 +184,16 @@ export async function submitAnswer(pin: string, playerId: string, questionId: st
     player.estimatedLatencyMs ?? 0,
     timeLimitMs
   );
-  const correct = current.choices[choiceIndex] === current.answer;
-  const points = computePoints(correct, trueReactionTimeMs, timeLimitMs, session.scoringMode);
+  const correctFraction = computeCorrectFraction(current.choices, current.correctChoices, choiceIndices);
+  const correct = correctFraction >= 1;
+  const points = computePoints(correctFraction, trueReactionTimeMs, timeLimitMs, session.scoringMode);
 
   try {
     await db.answer.create({
       data: {
         gameSessionQuestionId: current.id,
         playerId,
-        choiceIndex,
+        choiceIndices,
         serverReceivedAt,
         correct,
         points,

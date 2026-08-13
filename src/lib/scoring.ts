@@ -29,21 +29,44 @@ export function computeTrueReactionTimeMs(
 export type ScoringMode = "SPEED" | "ACCURACY";
 
 /**
- * Kahoot-style linear decay: a correct answer at t=0 scores full
- * BASE_POINTS, decaying to half of BASE_POINTS at t=timeLimit. An incorrect
- * answer always scores 0 (Story 4.3).
+ * Fraction of full credit earned for a set of selected choice indices
+ * against a question's correct choices: (correctPicks - incorrectPicks) /
+ * totalCorrectChoices, clamped to 0. For single-select questions (exactly
+ * one correct choice, exactly one pick) this collapses to the original
+ * all-or-nothing 1 or 0.
+ */
+export function computeCorrectFraction(choices: string[], correctChoices: string[], choiceIndices: number[]): number {
+  const correctSet = new Set(correctChoices);
+  const picked = choiceIndices.map((i) => choices[i]);
+  const correctPicks = picked.filter((choice) => correctSet.has(choice)).length;
+  const incorrectPicks = picked.length - correctPicks;
+  return Math.max(0, (correctPicks - incorrectPicks) / correctChoices.length);
+}
+
+/**
+ * Kahoot-style linear decay: a fully correct answer (correctFraction=1) at
+ * t=0 scores full BASE_POINTS, decaying to half of BASE_POINTS at
+ * t=timeLimit. An answer with no credit (correctFraction<=0) always scores
+ * 0 (Story 4.3).
  *
- * `mode: "ACCURACY"` ignores reaction time entirely — flat BASE_POINTS for
- * correct, 0 for incorrect — for hosts who'd rather rank by correctness
+ * `correctFraction` is 0..1 — 1/0 for a single-select question's
+ * right/wrong answer, or a partial value for multi-select questions graded
+ * on (correctPicks - incorrectPicks) / totalCorrectChoices. Points scale
+ * linearly with it, on top of whatever the mode/speed curve would award a
+ * fully correct answer.
+ *
+ * `mode: "ACCURACY"` ignores reaction time entirely — flat BASE_POINTS
+ * (scaled by correctFraction) — for hosts who'd rather rank by correctness
  * alone than reward speed.
  */
 export function computePoints(
-  correct: boolean,
+  correctFraction: number,
   trueReactionTimeMs: number,
   timeLimitMs: number,
   mode: ScoringMode = "SPEED"
 ): number {
-  if (!correct) return 0;
-  if (mode === "ACCURACY") return BASE_POINTS;
-  return Math.round(BASE_POINTS * (1 - trueReactionTimeMs / timeLimitMs / 2));
+  if (correctFraction <= 0) return 0;
+  const fullCreditPoints =
+    mode === "ACCURACY" ? BASE_POINTS : BASE_POINTS * (1 - trueReactionTimeMs / timeLimitMs / 2);
+  return Math.round(fullCreditPoints * correctFraction);
 }
