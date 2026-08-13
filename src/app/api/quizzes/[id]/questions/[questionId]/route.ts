@@ -20,11 +20,16 @@ export async function PATCH(
   if (!quiz) {
     return Response.json({ error: "Quiz not found." }, { status: 404 });
   }
-  if (quiz.status !== "DRAFT") {
-    return Response.json({ error: "Only draft quizzes can be edited." }, { status: 400 });
-  }
 
-  const data: { choices?: string[]; correctChoices?: string[]; timeLimitSecs?: number } = {};
+  const data: { question?: string; choices?: string[]; correctChoices?: string[]; timeLimitSecs?: number } = {};
+
+  if (body?.question !== undefined) {
+    const questionText = typeof body.question === "string" ? body.question.trim() : "";
+    if (!questionText || questionText.length > 500) {
+      return Response.json({ error: "question is required (max 500 characters)." }, { status: 400 });
+    }
+    data.question = questionText;
+  }
 
   if (body?.choices !== undefined) {
     if (question.type !== "MULTIPLE_CHOICE" && question.type !== "MULTI_SELECT") {
@@ -115,13 +120,10 @@ export async function DELETE(
 
   const quiz = await db.quiz.findUnique({
     where: { id },
-    select: { status: true, _count: { select: { questions: true } } },
+    select: { _count: { select: { questions: true } } },
   });
   if (!quiz) {
     return Response.json({ error: "Quiz not found." }, { status: 404 });
-  }
-  if (quiz.status !== "DRAFT") {
-    return Response.json({ error: "Only draft quizzes can be edited." }, { status: 400 });
   }
   if (quiz._count.questions <= 1) {
     return Response.json({ error: "A quiz must have at least one question." }, { status: 400 });
