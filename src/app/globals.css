@@ -172,6 +172,12 @@ input:focus-visible {
     border-color: rgba(46, 49, 146, 0.4);
     box-shadow: 0 0 0 4px rgba(46, 49, 146, 0.07);
   }
+
+  /* Dark scrim behind light text on colored answer tiles — a safety margin
+     so contrast holds even if a tile's background color changes later. */
+  .answer-tile-text {
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  }
 }
 
 @keyframes rise {
