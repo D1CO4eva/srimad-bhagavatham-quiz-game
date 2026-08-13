@@ -6,9 +6,14 @@
  */
 
 import { getCourseCatalog, resolveGenerationScope, getSourceText } from "@/lib/courseCatalog";
+import { db } from "@/lib/db";
 
 export const ALLOWED_DIFFICULTIES = new Set(["beginner", "intermediate", "advanced", "mixed"]);
 export const ALLOWED_QUESTION_COUNTS = new Set([5, 8, 10, 15, 20, 25, 30, 35]);
+// Bounds both the DB query and the resulting avoid-list size — the course
+// corpus is small (a single class's worth of material), so this comfortably
+// covers realistic history without the query or prompt growing unbounded.
+const MAX_EXISTING_QUESTIONS_FOR_DEDUP = 150;
 
 export type Difficulty = "beginner" | "intermediate" | "advanced" | "mixed";
 
@@ -20,6 +25,9 @@ export type GenerateQuizRequest = {
   scopeTopics: string[];
   coverageLabel: string;
   sourceText: string;
+  /** Prior quizzes' question text, most recent first — seeds generation's
+   * duplicate-avoidance beyond just the questions drafted in this one run. */
+  existingQuestions: string[];
 };
 
 export type GenerateQuizRequestResult =
@@ -64,6 +72,13 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
 
   const sourceText = getSourceText(catalog, weekIds);
 
+  const existingQuestionRows = await db.question.findMany({
+    orderBy: { quiz: { createdAt: "desc" } },
+    take: MAX_EXISTING_QUESTIONS_FOR_DEDUP,
+    select: { question: true },
+  });
+  const existingQuestions = existingQuestionRows.map((row) => row.question);
+
   return {
     ok: true,
     value: {
@@ -74,6 +89,7 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
       scopeTopics,
       coverageLabel,
       sourceText,
+      existingQuestions,
     },
   };
 }

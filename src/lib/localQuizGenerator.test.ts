@@ -18,20 +18,44 @@ function requestedType(messages: ChatMessage[]): "multiple_choice" | "true_false
   return userContent.includes('"type":"true_false"') ? "true_false" : "multiple_choice";
 }
 
+// Distinct, non-duplicate content per call (rather than one fixed string
+// reused everywhere) so tests exercise multiple slots without tripping the
+// generator's own near-duplicate rejection — a pool of 8 per type covers
+// every questionCount used below (max 5) even in the worst-case type split.
+const MC_QUESTIONS = [
+  { question: "Who narrates the Bhagavatam to Pariksit?", choices: ["Sukadeva Goswami", "Vyasa", "Narada", "Suta"], answer: "Sukadeva Goswami" },
+  { question: "Who cursed Maharaja Pariksit to die within seven days?", choices: ["Sringi", "Duryodhana", "Kamsa", "Ravana"], answer: "Sringi" },
+  { question: "How many cantos does the Bhagavatam have?", choices: ["10", "12", "18", "24"], answer: "12" },
+  { question: "Who compiled the Vedas into four divisions?", choices: ["Vyasadeva", "Narada", "Brahma", "Shiva"], answer: "Vyasadeva" },
+  { question: "What river does Pariksit sit beside to hear the Bhagavatam?", choices: ["Ganges", "Yamuna", "Sarasvati", "Godavari"], answer: "Ganges" },
+  { question: "Who is the speaker of the Bhagavad Gita?", choices: ["Krishna", "Arjuna", "Vyasa", "Sanjaya"], answer: "Krishna" },
+  { question: "The Bhagavatam is considered a natural commentary on which text?", choices: ["Vedanta Sutra", "Manu Smriti", "Yoga Sutra", "Upanishads"], answer: "Vedanta Sutra" },
+  { question: "Who was Pariksit's grandfather?", choices: ["Arjuna", "Yudhisthira", "Bhima", "Nakula"], answer: "Arjuna" },
+];
+const TF_QUESTIONS = [
+  { question: "Krishna appears in Canto 1?", answer: "True" },
+  { question: "Pariksit ruled for one hundred years after the curse?", answer: "False" },
+  { question: "Sukadeva Goswami was Vyasadeva's son?", answer: "True" },
+  { question: "The Bhagavatam has twenty-four cantos?", answer: "False" },
+  { question: "Pariksit heard the Bhagavatam for seven days before his death?", answer: "True" },
+  { question: "Narada Muni is the one who cursed Pariksit?", answer: "False" },
+  { question: "The Bhagavatam was originally composed in Sanskrit?", answer: "True" },
+  { question: "Vyasadeva personally narrated the Bhagavatam to Pariksit?", answer: "False" },
+];
+let mcIndex = 0;
+let tfIndex = 0;
+
 function validDraftFor(messages: ChatMessage[]): string {
   if (requestedType(messages) === "true_false") {
-    return JSON.stringify({
-      type: "true_false",
-      question: "Krishna appears in Canto 1?",
-      answer: "True",
-      explanation: "Because.",
-    });
+    const q = TF_QUESTIONS[tfIndex++ % TF_QUESTIONS.length];
+    return JSON.stringify({ type: "true_false", question: q.question, answer: q.answer, explanation: "Because." });
   }
+  const q = MC_QUESTIONS[mcIndex++ % MC_QUESTIONS.length];
   return JSON.stringify({
     type: "multiple_choice",
-    question: "Who narrates the Bhagavatam to Pariksit?",
-    choices: ["Sukadeva Goswami", "Vyasa", "Narada", "Suta"],
-    answer: "Sukadeva Goswami",
+    question: q.question,
+    choices: q.choices,
+    answer: q.answer,
     explanation: "Because.",
   });
 }
@@ -44,6 +68,8 @@ describe("generateQuiz", () => {
     // sourceText would do for real) so tests that aren't about grounding
     // don't need to think about it.
     scoreFaithfulnessMock.mockImplementation(async () => null);
+    mcIndex = 0;
+    tfIndex = 0;
   });
 
   afterEach(() => {
@@ -194,5 +220,62 @@ describe("generateQuiz", () => {
         coverageLabel: "Week 1",
       })
     ).rejects.toThrow(QuizGenerationError);
+  });
+
+  it("seeds the avoid-list with existingQuestions passed in from the caller", async () => {
+    // Every draft this mock produces matches an "existing" question exactly
+    // (reworded slightly doesn't matter here — same text), so every attempt
+    // across all three tries should be rejected as a near-duplicate and the
+    // slot should be dropped rather than accepted.
+    completeChatMock.mockImplementation(async () =>
+      JSON.stringify({
+        type: "true_false",
+        question: "Krishna appears in Canto 1?",
+        answer: "True",
+        explanation: "Because.",
+      })
+    );
+
+    const { generateQuiz, QuizGenerationError } = await import("@/lib/localQuizGenerator");
+    await expect(
+      generateQuiz({
+        topics: ["Sanatana Dharma"],
+        sourceText: "",
+        questionCount: 1,
+        difficulty: "mixed",
+        coverageLabel: "Week 1",
+        existingQuestions: ["Krishna appears in Canto 1?"],
+      })
+    ).rejects.toThrow(QuizGenerationError);
+  });
+});
+
+describe("isNearDuplicate", () => {
+  it("flags an exact repeat", async () => {
+    const { isNearDuplicate } = await import("@/lib/localQuizGenerator");
+    expect(isNearDuplicate("How many cantos does the Bhagavatam have?", ["How many cantos does the Bhagavatam have?"])).toBe(
+      true
+    );
+  });
+
+  it("flags a reworded near-duplicate asking the same underlying fact", async () => {
+    const { isNearDuplicate } = await import("@/lib/localQuizGenerator");
+    expect(
+      isNearDuplicate("How many cantos does the Srimad Bhagavatam have in total?", [
+        "How many cantos does the Bhagavatam have?",
+      ])
+    ).toBe(true);
+  });
+
+  it("does not flag a genuinely different question", async () => {
+    const { isNearDuplicate } = await import("@/lib/localQuizGenerator");
+    expect(
+      isNearDuplicate("Who narrated the Bhagavatam to Maharaja Parikshit?", ["How many cantos does the Bhagavatam have?"])
+    ).toBe(false);
+  });
+
+  it("is false against an empty avoid-list", async () => {
+    const { isNearDuplicate } = await import("@/lib/localQuizGenerator");
+    expect(isNearDuplicate("Any question at all?", [])).toBe(false);
   });
 });
