@@ -3,15 +3,32 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { StartGameButton } from "./StartGameButton";
+import { EditableQuestion } from "./EditableQuestion";
+
+type PublishedQuestion = {
+  id: string;
+  type: "MULTIPLE_CHOICE" | "TRUE_FALSE" | "SHORT_ANSWER" | "MULTI_SELECT";
+  question: string;
+  choices: string[];
+  correctChoices: string[];
+  timeLimitSecs: number;
+};
 
 export function PublishedQuizCard({
   quiz,
 }: {
-  quiz: { id: string; title: string; questionCount: number };
+  quiz: { id: string; title: string; questionCount: number; questions: PublishedQuestion[] };
 }) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  // Lifted out of EditableQuestion so a saved edit survives collapsing and
+  // re-expanding the "Review questions" panel. Editing a published quiz's
+  // questions is safe for any session already underway — GameSession
+  // snapshots question data at creation time, so this only affects
+  // sessions started after the edit.
+  const [questions, setQuestions] = useState(quiz.questions);
 
   async function handleDelete() {
     if (!window.confirm(`Delete "${quiz.title}"? This can't be undone.`)) return;
@@ -29,26 +46,57 @@ export function PublishedQuizCard({
   }
 
   return (
-    <li className="card flex items-center justify-between gap-4 p-5">
-      <div>
-        <p className="font-serif text-xl text-brand-ink">{quiz.title}</p>
-        <p className="text-sm text-ink-soft">
-          {quiz.questionCount} question
-          {quiz.questionCount === 1 ? "" : "s"}
-        </p>
-        {error && <p className="mt-1 text-xs text-danger">{error}</p>}
+    <li className="card flex flex-col gap-4 p-5">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="font-serif text-xl text-brand-ink">{quiz.title}</p>
+          <p className="text-sm text-ink-soft">
+            {questions.length} question
+            {questions.length === 1 ? "" : "s"}
+          </p>
+        </div>
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="btn btn-secondary text-danger"
+          >
+            {isDeleting ? "Deleting…" : "Delete"}
+          </button>
+          <StartGameButton quizId={quiz.id} />
+        </div>
       </div>
-      <div className="flex flex-shrink-0 items-center gap-2">
-        <button
-          type="button"
-          onClick={handleDelete}
-          disabled={isDeleting}
-          className="btn btn-secondary text-danger"
-        >
-          {isDeleting ? "Deleting…" : "Delete"}
-        </button>
-        <StartGameButton quizId={quiz.id} />
-      </div>
+
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="self-start text-sm font-semibold text-brand-ink"
+      >
+        {expanded ? "Hide questions" : "Review / edit questions"}
+      </button>
+
+      {expanded && (
+        <ol className="flex flex-col gap-3">
+          {questions.map((question, index) => (
+            <EditableQuestion
+              key={question.id}
+              quizId={quiz.id}
+              question={question}
+              index={index}
+              canDelete={questions.length > 1}
+              onSaved={(updated) =>
+                setQuestions((current) =>
+                  current.map((q) => (q.id === question.id ? { ...q, ...updated } : q))
+                )
+              }
+              onDeleted={() => setQuestions((current) => current.filter((q) => q.id !== question.id))}
+            />
+          ))}
+        </ol>
+      )}
+
+      {error && <p className="text-sm text-danger">{error}</p>}
     </li>
   );
 }

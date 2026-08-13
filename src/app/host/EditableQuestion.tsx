@@ -31,12 +31,14 @@ export function EditableQuestion({
   question: Question;
   index: number;
   canDelete: boolean;
-  onSaved: (updated: { choices: string[]; correctChoices: string[]; timeLimitSecs: number }) => void;
+  onSaved: (updated: { question: string; choices: string[]; correctChoices: string[]; timeLimitSecs: number }) => void;
   onDeleted: () => void;
 }) {
+  const [savedQuestionText, setSavedQuestionText] = useState(question.question);
   const [savedChoices, setSavedChoices] = useState(question.choices);
   const [savedCorrectChoices, setSavedCorrectChoices] = useState(question.correctChoices);
   const [savedTimeLimitSecs, setSavedTimeLimitSecs] = useState(question.timeLimitSecs);
+  const [questionText, setQuestionText] = useState(question.question);
   const [choices, setChoices] = useState(question.choices);
   const [correctChoices, setCorrectChoices] = useState(question.correctChoices);
   const [timeLimitSecs, setTimeLimitSecs] = useState(question.timeLimitSecs);
@@ -52,10 +54,12 @@ export function EditableQuestion({
     timeLimitSecs >= MIN_TIME_LIMIT_SECS &&
     timeLimitSecs <= MAX_TIME_LIMIT_SECS;
   const dirty =
+    questionText.trim() !== savedQuestionText ||
     !sameChoices(correctChoices, savedCorrectChoices) ||
     timeLimitSecs !== savedTimeLimitSecs ||
     choices.some((choice, i) => choice !== savedChoices[i]);
-  const canSave = dirty && timeLimitValid && correctChoices.length >= (isMultiSelect ? 2 : 1);
+  const canSave =
+    dirty && timeLimitValid && questionText.trim() !== "" && correctChoices.length >= (isMultiSelect ? 2 : 1);
 
   function updateChoiceText(choiceIndex: number, value: string) {
     setError(null);
@@ -90,6 +94,10 @@ export function EditableQuestion({
       setError(`Time limit must be between ${MIN_TIME_LIMIT_SECS} and ${MAX_TIME_LIMIT_SECS} seconds.`);
       return;
     }
+    if (questionText.trim() === "") {
+      setError("Question text can't be empty.");
+      return;
+    }
     if (correctChoices.length < (isMultiSelect ? 2 : 1)) {
       setError(isMultiSelect ? "Select at least two correct choices." : "Select the correct answer.");
       return;
@@ -97,9 +105,12 @@ export function EditableQuestion({
     setIsSaving(true);
     setError(null);
     try {
-      const body: { choices?: string[]; correctChoices: string[]; timeLimitSecs: number } = editableChoiceText
-        ? { choices, correctChoices, timeLimitSecs }
-        : { correctChoices, timeLimitSecs };
+      const body: { question: string; choices?: string[]; correctChoices: string[]; timeLimitSecs: number } = {
+        question: questionText.trim(),
+        correctChoices,
+        timeLimitSecs,
+        ...(editableChoiceText ? { choices } : {}),
+      };
       const response = await fetch(`/api/quizzes/${quizId}/questions/${question.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -107,14 +118,21 @@ export function EditableQuestion({
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Could not save this question.");
+      setQuestionText(data.question);
       setChoices(data.choices);
       setCorrectChoices(data.correctChoices);
       setTimeLimitSecs(data.timeLimitSecs);
+      setSavedQuestionText(data.question);
       setSavedChoices(data.choices);
       setSavedCorrectChoices(data.correctChoices);
       setSavedTimeLimitSecs(data.timeLimitSecs);
       setJustSaved(true);
-      onSaved({ choices: data.choices, correctChoices: data.correctChoices, timeLimitSecs: data.timeLimitSecs });
+      onSaved({
+        question: data.question,
+        choices: data.choices,
+        correctChoices: data.correctChoices,
+        timeLimitSecs: data.timeLimitSecs,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save this question.");
     } finally {
@@ -141,9 +159,20 @@ export function EditableQuestion({
 
   return (
     <li className="rounded-2xl border border-line p-4 text-sm">
-      <p className="font-semibold text-ink">
-        {index + 1}. {question.question}
-      </p>
+      <label className="flex items-start gap-2">
+        <span className="mt-2.5 font-semibold text-ink">{index + 1}.</span>
+        <textarea
+          value={questionText}
+          onChange={(event) => {
+            setQuestionText(event.target.value);
+            setError(null);
+            setJustSaved(false);
+          }}
+          maxLength={500}
+          rows={2}
+          className="input-field flex-1 resize-y font-semibold text-ink"
+        />
+      </label>
       <p className="mt-1 text-xs text-ink-soft">
         {isMultiSelect ? "Select all correct answers" : "Select the correct answer"}
         {editableChoiceText ? " and edit choice text" : ""}.

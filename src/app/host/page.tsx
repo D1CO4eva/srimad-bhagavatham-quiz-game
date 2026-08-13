@@ -41,6 +41,17 @@ export default async function HostPage() {
         title: true,
         description: true,
         _count: { select: { questions: true } },
+        questions: {
+          orderBy: { order: "asc" },
+          select: {
+            id: true,
+            type: true,
+            question: true,
+            choices: true,
+            correctChoices: true,
+            timeLimitSecs: true,
+          },
+        },
       },
     }),
   ]);
@@ -83,7 +94,12 @@ export default async function HostPage() {
             {published.map((quiz) => (
               <PublishedQuizCard
                 key={quiz.id}
-                quiz={{ id: quiz.id, title: quiz.title, questionCount: quiz._count.questions }}
+                quiz={{
+                  id: quiz.id,
+                  title: quiz.title,
+                  questionCount: quiz._count.questions,
+                  questions: quiz.questions,
+                }}
               />
             ))}
           </ul>
