@@ -51,6 +51,8 @@ model Quiz {
   showLeaderboardDefault Boolean     @default(true)
   showTimerDefault       Boolean     @default(true)
   scoringMode            ScoringMode @default(SPEED)
+  /// Seconds the question is shown before its answer choices appear.
+  leadTimeSecs           Int         @default(5)
 
   questions    Question[]
   gameSessions GameSession[]
@@ -93,6 +95,7 @@ model GameSession {
   showLeaderboard Boolean     @default(true)
   showTimer       Boolean     @default(true)
   scoringMode     ScoringMode @default(SPEED)
+  leadTimeSecs    Int         @default(5)
 
   questions GameSessionQuestion[]
   players   Player[]
@@ -132,9 +135,13 @@ model GameSessionQuestion {
   explanation   String       @default("")
   timeLimitSecs Int
 
-  /// Set when the host advances to this question (Story 3.1); the countdown
-  /// and the server's answer deadline are both computed from this.
+  /// Set when the host advances to this question (Story 3.1); the question
+  /// text is shown to players from this moment.
   startedAt DateTime?
+  /// Set alongside startedAt to startedAt + leadTimeSecs: answer choices
+  /// stay hidden/disabled and the answer deadline doesn't start ticking
+  /// until this moment, giving players a beat to read the question first.
+  optionsRevealedAt DateTime?
   /// Set when the question is locked, either by "Lock Now" or by the host's
   /// timer reaching zero (Story 3.5). The deadline check in answer
   /// submission (startedAt + timeLimitSecs) is the real authority (Story

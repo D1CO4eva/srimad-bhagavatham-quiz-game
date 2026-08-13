@@ -23,6 +23,7 @@ export function QuizDraftCard({
     showLeaderboardDefault: boolean;
     showTimerDefault: boolean;
     scoringMode: "SPEED" | "ACCURACY";
+    leadTimeSecs: number;
   };
 }) {
   const router = useRouter();
@@ -38,6 +39,7 @@ export function QuizDraftCard({
   const [showLeaderboardDefault, setShowLeaderboardDefault] = useState(quiz.showLeaderboardDefault);
   const [showTimerDefault, setShowTimerDefault] = useState(quiz.showTimerDefault);
   const [scoringMode, setScoringMode] = useState(quiz.scoringMode);
+  const [leadTimeSecs, setLeadTimeSecs] = useState(quiz.leadTimeSecs);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   async function patch(body: {
@@ -46,6 +48,7 @@ export function QuizDraftCard({
     showLeaderboardDefault?: boolean;
     showTimerDefault?: boolean;
     scoringMode?: "SPEED" | "ACCURACY";
+    leadTimeSecs?: number;
   }) {
     const response = await fetch(`/api/quizzes/${quiz.id}`, {
       method: "PATCH",
@@ -86,11 +89,13 @@ export function QuizDraftCard({
     showLeaderboardDefault?: boolean;
     showTimerDefault?: boolean;
     scoringMode?: "SPEED" | "ACCURACY";
+    leadTimeSecs?: number;
   }) {
-    const prev = { showLeaderboardDefault, showTimerDefault, scoringMode };
+    const prev = { showLeaderboardDefault, showTimerDefault, scoringMode, leadTimeSecs };
     if (next.showLeaderboardDefault !== undefined) setShowLeaderboardDefault(next.showLeaderboardDefault);
     if (next.showTimerDefault !== undefined) setShowTimerDefault(next.showTimerDefault);
     if (next.scoringMode !== undefined) setScoringMode(next.scoringMode);
+    if (next.leadTimeSecs !== undefined) setLeadTimeSecs(next.leadTimeSecs);
     setIsSavingSettings(true);
     setError(null);
     try {
@@ -99,6 +104,7 @@ export function QuizDraftCard({
       setShowLeaderboardDefault(prev.showLeaderboardDefault);
       setShowTimerDefault(prev.showTimerDefault);
       setScoringMode(prev.scoringMode);
+      setLeadTimeSecs(prev.leadTimeSecs);
       setError(err instanceof Error ? err.message : "Could not save that setting.");
     } finally {
       setIsSavingSettings(false);
@@ -184,6 +190,23 @@ export function QuizDraftCard({
             <option value="SPEED">Speed (faster = more points)</option>
             <option value="ACCURACY">Accuracy only (correct = full points)</option>
           </select>
+        </label>
+        <label className="flex items-center gap-2">
+          Lead time (secs):
+          <input
+            type="number"
+            min={0}
+            max={30}
+            value={leadTimeSecs}
+            disabled={isSavingSettings}
+            onChange={(event) => {
+              const value = Number(event.target.value);
+              if (Number.isInteger(value) && value >= 0 && value <= 30) {
+                handleSettingsChange({ leadTimeSecs: value });
+              }
+            }}
+            className="input-field w-16 py-1"
+          />
         </label>
       </div>
 

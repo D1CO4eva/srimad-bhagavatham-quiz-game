@@ -26,6 +26,8 @@ export type QuestionStartPayload = {
   choices: string[];
   timeLimitSecs: number;
   startedAt: number | null;
+  /** Answer choices stay hidden/disabled until this moment (lead-time reveal). */
+  optionsRevealedAt: number | null;
 };
 
 export type AnswerCountUpdatePayload = { answeredCount: number; playerCount: number };

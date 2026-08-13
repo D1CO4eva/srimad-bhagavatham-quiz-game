@@ -58,7 +58,14 @@ export function PlayerLobby({
   const [showLeaderboard, setShowLeaderboard] = useState(initialShowLeaderboard);
   const [showTimer, setShowTimer] = useState(initialShowTimer);
 
-  const remaining = useCountdown(question?.startedAt ?? null, question?.timeLimitSecs ?? 0);
+  const leadDurationSecs =
+    question?.startedAt != null && question?.optionsRevealedAt != null
+      ? (question.optionsRevealedAt - question.startedAt) / 1000
+      : 0;
+  const leadRemaining = useCountdown(question?.startedAt ?? null, leadDurationSecs);
+  const optionsVisible = question !== null && leadRemaining <= 0;
+
+  const remaining = useCountdown(question?.optionsRevealedAt ?? null, question?.timeLimitSecs ?? 0);
 
   // Keep sessionStorage in sync even when this page was reached directly
   // (a shared link, a bookmark) rather than through /join, so a later
@@ -155,7 +162,7 @@ export function PlayerLobby({
   }, [playerId]);
 
   async function handleAnswer(choiceIndex: number) {
-    if (myChoice !== null || locked || !question) return;
+    if (myChoice !== null || locked || !question || !optionsVisible) return;
     setMyChoice(choiceIndex);
     setSubmitError(null);
     try {
@@ -196,9 +203,11 @@ export function PlayerLobby({
   if (question) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
-        {showTimer && <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>}
+        {showTimer && optionsVisible && <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>}
         <h1 className="max-w-md text-2xl">{question.question}</h1>
-        {myChoice !== null && submitError ? (
+        {!optionsVisible ? (
+          <p className="pill-badge">Get ready… {leadRemaining}</p>
+        ) : myChoice !== null && submitError ? (
           <p className="pill-badge">{submitError}</p>
         ) : myChoice !== null && locked && revealedAnswer !== null ? (
           question.choices[myChoice] === revealedAnswer ? (
@@ -213,31 +222,33 @@ export function PlayerLobby({
         ) : (
           <p className="pill-badge">Tap your answer</p>
         )}
-        <div className="grid w-full max-w-sm grid-cols-2 gap-4">
-          {question.choices.map((choice, index) => {
-            const shape = ANSWER_SHAPES[index % ANSWER_SHAPES.length];
-            const disabled = myChoice !== null || locked;
-            const isRevealed = revealedAnswer !== null;
-            const isCorrectChoice = isRevealed && choice === revealedAnswer;
-            const opacityClass = isRevealed ? (isCorrectChoice ? "" : "opacity-30") : disabled ? "opacity-40" : "";
-            return (
-              <button
-                key={index}
-                type="button"
-                disabled={disabled}
-                onClick={() => handleAnswer(index)}
-                className={`flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl px-3 py-4 text-center text-xl font-semibold text-white shadow-lg transition-all duration-500 ${opacityClass} ${
-                  isCorrectChoice ? "ring-4 ring-success" : ""
-                }`}
-                style={{ backgroundColor: shape.color }}
-                aria-label={shape.label}
-              >
-                <AnswerShapeIcon label={shape.label} className="h-6 w-6 shrink-0" />
-                <span className="answer-tile-text">{choice}</span>
-              </button>
-            );
-          })}
-        </div>
+        {optionsVisible && (
+          <div className="grid w-full max-w-sm grid-cols-2 gap-4">
+            {question.choices.map((choice, index) => {
+              const shape = ANSWER_SHAPES[index % ANSWER_SHAPES.length];
+              const disabled = myChoice !== null || locked;
+              const isRevealed = revealedAnswer !== null;
+              const isCorrectChoice = isRevealed && choice === revealedAnswer;
+              const opacityClass = isRevealed ? (isCorrectChoice ? "" : "opacity-30") : disabled ? "opacity-40" : "";
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => handleAnswer(index)}
+                  className={`flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl px-3 py-4 text-center text-xl font-semibold text-white shadow-lg transition-all duration-500 ${opacityClass} ${
+                    isCorrectChoice ? "ring-4 ring-success" : ""
+                  }`}
+                  style={{ backgroundColor: shape.color }}
+                  aria-label={shape.label}
+                >
+                  <AnswerShapeIcon label={shape.label} className="h-6 w-6 shrink-0" />
+                  <span className="answer-tile-text">{choice}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         {showLeaderboard && locked && leaderboard && (
           <div className="w-full max-w-sm">
             <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Top 5</p>

@@ -19,6 +19,7 @@ export default async function HostPage() {
         showLeaderboardDefault: true,
         showTimerDefault: true,
         scoringMode: true,
+        leadTimeSecs: true,
         questions: {
           orderBy: { order: "asc" },
           select: {

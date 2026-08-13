@@ -40,6 +40,7 @@ export default async function HostLobbyPage({
         choices: current.choices,
         timeLimitSecs: current.timeLimitSecs,
         startedAt: current.startedAt?.getTime() ?? null,
+        optionsRevealedAt: current.optionsRevealedAt?.getTime() ?? null,
       }
     : null;
 

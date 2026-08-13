@@ -20,6 +20,7 @@ export function toPublicQuestion(question: {
   choices: string[];
   timeLimitSecs: number;
   startedAt: Date | null;
+  optionsRevealedAt?: Date | null;
 }): QuestionStartPayload {
   return {
     questionId: question.id,
@@ -29,6 +30,7 @@ export function toPublicQuestion(question: {
     choices: question.choices,
     timeLimitSecs: question.timeLimitSecs,
     startedAt: question.startedAt?.getTime() ?? null,
+    optionsRevealedAt: question.optionsRevealedAt?.getTime() ?? null,
   };
 }
 
@@ -49,6 +51,7 @@ export async function advanceToNextQuestion(pin: string) {
   if (!nextQuestion) throw new QuestionFlowError("No more questions in this session.");
 
   const startedAt = new Date();
+  const optionsRevealedAt = new Date(startedAt.getTime() + session.leadTimeSecs * 1000);
   await db.$transaction([
     db.gameSession.update({
       where: { id: session.id },
@@ -56,11 +59,11 @@ export async function advanceToNextQuestion(pin: string) {
     }),
     db.gameSessionQuestion.update({
       where: { id: nextQuestion.id },
-      data: { startedAt },
+      data: { startedAt, optionsRevealedAt },
     }),
   ]);
 
-  const payload = toPublicQuestion({ ...nextQuestion, startedAt });
+  const payload = toPublicQuestion({ ...nextQuestion, startedAt, optionsRevealedAt });
   await publishToSession(pin, SessionEvent.QuestionStart, payload);
   return payload;
 }
@@ -126,8 +129,16 @@ export async function submitAnswer(pin: string, playerId: string, questionId: st
   if (!current.startedAt) {
     throw new AnswerRejectedError("That question hasn't started yet.");
   }
-  const deadline = current.startedAt.getTime() + current.timeLimitSecs * 1000;
+  // Reaction time and the answer deadline are both relative to when options
+  // actually became visible (startedAt + leadTimeSecs), not when the
+  // question text first appeared — falls back to startedAt for any row from
+  // before lead-time reveal existed.
+  const revealAt = current.optionsRevealedAt ?? current.startedAt;
   const serverReceivedAt = new Date();
+  if (serverReceivedAt.getTime() < revealAt.getTime()) {
+    throw new AnswerRejectedError("Answer options aren't open yet.");
+  }
+  const deadline = revealAt.getTime() + current.timeLimitSecs * 1000;
   if (current.lockedAt || serverReceivedAt.getTime() > deadline) {
     throw new AnswerRejectedError("The question is locked.");
   }
@@ -144,7 +155,7 @@ export async function submitAnswer(pin: string, playerId: string, questionId: st
   }
 
   const timeLimitMs = current.timeLimitSecs * 1000;
-  const rawReactionTimeMs = computeRawReactionTimeMs(serverReceivedAt.getTime(), current.startedAt.getTime());
+  const rawReactionTimeMs = computeRawReactionTimeMs(serverReceivedAt.getTime(), revealAt.getTime());
   const trueReactionTimeMs = computeTrueReactionTimeMs(
     rawReactionTimeMs,
     player.estimatedLatencyMs ?? 0,
