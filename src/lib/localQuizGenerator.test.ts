@@ -18,58 +18,57 @@ function requestedType(messages: ChatMessage[]): "multiple_choice" | "true_false
   return userContent.includes('"type":"true_false"') ? "true_false" : "multiple_choice";
 }
 
-// Distinct, non-duplicate content per call (rather than one fixed string
-// reused everywhere) so tests exercise multiple slots without tripping the
-// generator's own near-duplicate rejection — a pool of 8 per type covers
-// every questionCount used below (max 5) even in the worst-case type split.
-const MC_QUESTIONS = [
-  { question: "Who narrates the Bhagavatam to Pariksit?", choices: ["Sukadeva Goswami", "Vyasa", "Narada", "Suta"], answer: "Sukadeva Goswami" },
-  { question: "Who cursed Maharaja Pariksit to die within seven days?", choices: ["Sringi", "Duryodhana", "Kamsa", "Ravana"], answer: "Sringi" },
-  { question: "How many cantos does the Bhagavatam have?", choices: ["10", "12", "18", "24"], answer: "12" },
-  { question: "Who compiled the Vedas into four divisions?", choices: ["Vyasadeva", "Narada", "Brahma", "Shiva"], answer: "Vyasadeva" },
-  { question: "What river does Pariksit sit beside to hear the Bhagavatam?", choices: ["Ganges", "Yamuna", "Sarasvati", "Godavari"], answer: "Ganges" },
-  { question: "Who is the speaker of the Bhagavad Gita?", choices: ["Krishna", "Arjuna", "Vyasa", "Sanjaya"], answer: "Krishna" },
-  { question: "The Bhagavatam is considered a natural commentary on which text?", choices: ["Vedanta Sutra", "Manu Smriti", "Yoga Sutra", "Upanishads"], answer: "Vedanta Sutra" },
-  { question: "Who was Pariksit's grandfather?", choices: ["Arjuna", "Yudhisthira", "Bhima", "Nakula"], answer: "Arjuna" },
-];
-const TF_QUESTIONS = [
-  { question: "Krishna appears in Canto 1?", answer: "True" },
-  { question: "Pariksit ruled for one hundred years after the curse?", answer: "False" },
-  { question: "Sukadeva Goswami was Vyasadeva's son?", answer: "True" },
-  { question: "The Bhagavatam has twenty-four cantos?", answer: "False" },
-  { question: "Pariksit heard the Bhagavatam for seven days before his death?", answer: "True" },
-  { question: "Narada Muni is the one who cursed Pariksit?", answer: "False" },
-  { question: "The Bhagavatam was originally composed in Sanskrit?", answer: "True" },
-  { question: "Vyasadeva personally narrated the Bhagavatam to Pariksit?", answer: "False" },
-];
-let mcIndex = 0;
-let tfIndex = 0;
+// checkAnswerable() reuses completeChat (same mock as drafting calls) rather
+// than a separate module like faithfulness, so tests distinguish it by the
+// one phrase only its own prompt contains.
+function isAnswerabilityCheck(messages: ChatMessage[]): boolean {
+  return (messages.find((m) => m.role === "user")?.content ?? "").includes("Marked correct answer:");
+}
 
+// Each call cycles through genuinely distinct facts (not just a numeric
+// suffix — normalizeWords drops words of length <= 3, including bare
+// digits, so e.g. "chapter 1" vs "chapter 2" would normalize to identical
+// word sets and falsely trip duplicate detection) so tests that aren't
+// about duplicate detection don't accidentally trigger it.
+const MULTIPLE_CHOICE_FACTS = [
+  { question: "Who narrates the Bhagavatam to Pariksit?", choices: ["Sukadeva Goswami", "Vyasa", "Narada", "Suta"], answer: "Sukadeva Goswami" },
+  { question: "Which sage compiled the Vedas into four divisions?", choices: ["Vyasa", "Valmiki", "Narada", "Suta"], answer: "Vyasa" },
+  { question: "Who is described as the son of Vyasa in the Bhagavatam?", choices: ["Sukadeva", "Arjuna", "Yudhishthira", "Bhima"], answer: "Sukadeva" },
+  { question: "Which king heard the Bhagavatam before his death?", choices: ["Pariksit", "Yudhishthira", "Dhritarashtra", "Duryodhana"], answer: "Pariksit" },
+  { question: "Whose curse led to Pariksit's seven-day deadline?", choices: ["Shringi", "Shukadeva", "Vyasa", "Narada"], answer: "Shringi" },
+];
+const TRUE_FALSE_FACTS = [
+  "Krishna appears within the events narrated in the Bhagavatam's tenth canto.",
+  "The Srimad Bhagavatam is traditionally divided into twelve cantos.",
+  "Vyasa is credited with compiling the Mahabharata.",
+  "Pariksit was cursed by the son of a brahmana sage.",
+  "Sukadeva Goswami is described as a renunciate from birth.",
+];
+let draftCounter = 0;
 function validDraftFor(messages: ChatMessage[]): string {
-  if (requestedType(messages) === "true_false") {
-    const q = TF_QUESTIONS[tfIndex++ % TF_QUESTIONS.length];
-    return JSON.stringify({ type: "true_false", question: q.question, answer: q.answer, explanation: "Because." });
+  // checkAnswerable() also goes through completeChat — default it to a
+  // benign pass so tests that aren't specifically about answerability don't
+  // need to think about it, and (just as importantly) so it doesn't consume
+  // a draftCounter tick and throw off which fact each real draft call gets.
+  if (isAnswerabilityCheck(messages)) {
+    return JSON.stringify({ answerable: true, reason: "fine" });
   }
-  const q = MC_QUESTIONS[mcIndex++ % MC_QUESTIONS.length];
-  return JSON.stringify({
-    type: "multiple_choice",
-    question: q.question,
-    choices: q.choices,
-    answer: q.answer,
-    explanation: "Because.",
-  });
+  const index = draftCounter++ % MULTIPLE_CHOICE_FACTS.length;
+  if (requestedType(messages) === "true_false") {
+    return JSON.stringify({ type: "true_false", question: TRUE_FALSE_FACTS[index], answer: "True", explanation: "Because." });
+  }
+  return JSON.stringify({ type: "multiple_choice", ...MULTIPLE_CHOICE_FACTS[index], explanation: "Because." });
 }
 
 describe("generateQuiz", () => {
   const originalFallback = process.env.OPENROUTER_MODEL_FALLBACK;
 
   beforeEach(() => {
+    draftCounter = 0;
     // Default: faithfulness check passes (or is skipped, same as an empty
     // sourceText would do for real) so tests that aren't about grounding
     // don't need to think about it.
     scoreFaithfulnessMock.mockImplementation(async () => null);
-    mcIndex = 0;
-    tfIndex = 0;
   });
 
   afterEach(() => {
@@ -222,11 +221,126 @@ describe("generateQuiz", () => {
     ).rejects.toThrow(QuizGenerationError);
   });
 
-  it("seeds the avoid-list with existingQuestions passed in from the caller", async () => {
-    // Every draft this mock produces matches an "existing" question exactly
-    // (reworded slightly doesn't matter here — same text), so every attempt
-    // across all three tries should be rejected as a near-duplicate and the
-    // slot should be dropped rather than accepted.
+  it("never keeps two questions that are exact repeats of each other", async () => {
+    // Every call returns the exact same multiple_choice content — with two
+    // slots running concurrently, both can pass their own duplicate check
+    // before either result is recorded (the scenario the final sweep pass
+    // exists to catch), and every regeneration attempt is just as
+    // duplicate, so the second slot should end up dropped rather than kept.
+    completeChatMock.mockImplementation(async () =>
+      JSON.stringify({
+        type: "multiple_choice",
+        question: "What is the main subject that Srimad Bhagavatam directs us towards?",
+        choices: ["Mukti", "Ashraya", "Sarga", "Poshanam"],
+        answer: "Ashraya",
+        explanation: "Because.",
+      })
+    );
+
+    const { generateQuiz } = await import("@/lib/localQuizGenerator");
+    const quiz = await generateQuiz({
+      topics: ["Sanatana Dharma"],
+      sourceText: "",
+      questionCount: 2,
+      difficulty: "mixed",
+      coverageLabel: "Week 1",
+    });
+
+    expect(quiz.questions).toHaveLength(1);
+  });
+
+  it("rejects a reworded question that reuses the same answer and mostly the same choices", async () => {
+    // Reproduces the reported bug: differently-worded questions that both
+    // resolve to the same answer with 3 of 4 choices in common (only their
+    // wording differs, e.g. "main subject Bhagavatam directs us towards"
+    // vs. "main subject (lakshana) of Canto 10") should be caught even
+    // though plain question-text similarity wouldn't flag them.
+    let call = 0;
+    completeChatMock.mockImplementation(async () => {
+      call++;
+      return call % 2 === 1
+        ? JSON.stringify({
+            type: "multiple_choice",
+            question: "What is the main subject that Srimad Bhagavatam directs us towards?",
+            choices: ["Mukti", "Ashraya", "Sarga", "Poshanam"],
+            answer: "Ashraya",
+            explanation: "Because.",
+          })
+        : JSON.stringify({
+            type: "multiple_choice",
+            question: "What is the main subject (lakshana) of Canto 10 in Srimad Bhagavatam?",
+            choices: ["Ashraya", "Sarga", "Visarga", "Mukti"],
+            answer: "Ashraya",
+            explanation: "Because.",
+          });
+    });
+
+    const { generateQuiz } = await import("@/lib/localQuizGenerator");
+    const quiz = await generateQuiz({
+      topics: ["Sanatana Dharma"],
+      sourceText: "",
+      questionCount: 2,
+      difficulty: "mixed",
+      coverageLabel: "Week 1",
+    });
+
+    expect(quiz.questions).toHaveLength(1);
+  });
+
+  it("rejects an ambiguous multiple_choice draft and recovers once the answerability check passes", async () => {
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0); // forces multiple_choice every time
+    let answerabilityCalls = 0;
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
+      if (isAnswerabilityCheck(messages)) {
+        answerabilityCalls++;
+        return JSON.stringify({ answerable: answerabilityCalls > 1, reason: "test" });
+      }
+      return validDraftFor(messages);
+    });
+
+    const { generateQuiz } = await import("@/lib/localQuizGenerator");
+    const quiz = await generateQuiz({
+      topics: ["Sanatana Dharma"],
+      sourceText: "",
+      questionCount: 1,
+      difficulty: "mixed",
+      coverageLabel: "Week 1",
+    });
+
+    expect(quiz.questions).toHaveLength(1);
+    expect(quiz.questions[0].type).toBe("multiple_choice");
+    expect(answerabilityCalls).toBeGreaterThan(1);
+    randomSpy.mockRestore();
+  });
+
+  it("drops a multiple_choice slot whose answerability check never passes", async () => {
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0); // forces multiple_choice every time
+    completeChatMock.mockImplementation(async (_model: string, messages: ChatMessage[]) => {
+      if (isAnswerabilityCheck(messages)) {
+        return JSON.stringify({ answerable: false, reason: "always ambiguous" });
+      }
+      return validDraftFor(messages);
+    });
+
+    const { generateQuiz, QuizGenerationError } = await import("@/lib/localQuizGenerator");
+    await expect(
+      generateQuiz({
+        topics: ["Sanatana Dharma"],
+        sourceText: "",
+        questionCount: 1,
+        difficulty: "mixed",
+        coverageLabel: "Week 1",
+      })
+    ).rejects.toThrow(QuizGenerationError);
+    randomSpy.mockRestore();
+  });
+
+  it("drops a slot whose every draft duplicates an existingQuestions entry passed in by the caller", async () => {
+    // existingQuestions represents prior quizzes' history (Phase 5:
+    // generation dedup) — findDuplicate checks the merged in-batch +
+    // existingQuestions list, so a draft that only duplicates something
+    // from existingQuestions (never generated in this run) should still be
+    // caught on every attempt and the slot dropped.
     completeChatMock.mockImplementation(async () =>
       JSON.stringify({
         type: "true_false",
@@ -244,38 +358,17 @@ describe("generateQuiz", () => {
         questionCount: 1,
         difficulty: "mixed",
         coverageLabel: "Week 1",
-        existingQuestions: ["Krishna appears in Canto 1?"],
+        existingQuestions: [
+          {
+            id: "existing-1",
+            type: "true_false",
+            question: "Krishna appears in Canto 1?",
+            choices: ["True", "False"],
+            answer: "True",
+            explanation: "",
+          },
+        ],
       })
     ).rejects.toThrow(QuizGenerationError);
-  });
-});
-
-describe("isNearDuplicate", () => {
-  it("flags an exact repeat", async () => {
-    const { isNearDuplicate } = await import("@/lib/localQuizGenerator");
-    expect(isNearDuplicate("How many cantos does the Bhagavatam have?", ["How many cantos does the Bhagavatam have?"])).toBe(
-      true
-    );
-  });
-
-  it("flags a reworded near-duplicate asking the same underlying fact", async () => {
-    const { isNearDuplicate } = await import("@/lib/localQuizGenerator");
-    expect(
-      isNearDuplicate("How many cantos does the Srimad Bhagavatam have in total?", [
-        "How many cantos does the Bhagavatam have?",
-      ])
-    ).toBe(true);
-  });
-
-  it("does not flag a genuinely different question", async () => {
-    const { isNearDuplicate } = await import("@/lib/localQuizGenerator");
-    expect(
-      isNearDuplicate("Who narrated the Bhagavatam to Maharaja Parikshit?", ["How many cantos does the Bhagavatam have?"])
-    ).toBe(false);
-  });
-
-  it("is false against an empty avoid-list", async () => {
-    const { isNearDuplicate } = await import("@/lib/localQuizGenerator");
-    expect(isNearDuplicate("Any question at all?", [])).toBe(false);
   });
 });

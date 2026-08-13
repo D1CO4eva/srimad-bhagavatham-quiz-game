@@ -9,12 +9,14 @@ import {
   type PodiumPayload,
   type QuestionLockedPayload,
   type QuestionStartPayload,
+  type QuoteDisplayPayload,
   type SettingsUpdatePayload,
 } from "@/lib/events";
 import { measureLatency } from "@/lib/latency";
 import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_SHAPES } from "@/lib/answerShapes";
 import { AnswerShapeIcon } from "@/components/AnswerShapeIcon";
+import { QuoteOverlay } from "@/components/QuoteOverlay";
 import { savePlayerSession } from "@/lib/playerSession";
 import type { InboundMessage } from "ably";
 
@@ -60,6 +62,7 @@ export function PlayerLobby({
   const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
   const [showLeaderboard, setShowLeaderboard] = useState(initialShowLeaderboard);
   const [showTimer, setShowTimer] = useState(initialShowTimer);
+  const [activeQuote, setActiveQuote] = useState<QuoteDisplayPayload | null>(null);
 
   const isMultiSelect = question?.type === "MULTI_SELECT";
 
@@ -93,6 +96,10 @@ export function PlayerLobby({
       setSubmitError(null);
       setMyRank(null);
       setLeaderboard(null);
+      setActiveQuote(null);
+    };
+    const onQuoteDisplay = (message: InboundMessage) => {
+      setActiveQuote(message.data as QuoteDisplayPayload);
     };
     const onQuestionLocked = (message: InboundMessage) => {
       const data = message.data as QuestionLockedPayload;
@@ -112,6 +119,7 @@ export function PlayerLobby({
     };
 
     channel.subscribe(SessionEvent.GameStarted, onGameStarted);
+    channel.subscribe(SessionEvent.QuoteDisplay, onQuoteDisplay);
     channel.subscribe(SessionEvent.QuestionStart, onQuestionStart);
     channel.subscribe(SessionEvent.QuestionLocked, onQuestionLocked);
     channel.subscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
@@ -120,6 +128,7 @@ export function PlayerLobby({
 
     return () => {
       channel.unsubscribe(SessionEvent.GameStarted, onGameStarted);
+      channel.unsubscribe(SessionEvent.QuoteDisplay, onQuoteDisplay);
       channel.unsubscribe(SessionEvent.QuestionStart, onQuestionStart);
       channel.unsubscribe(SessionEvent.QuestionLocked, onQuestionLocked);
       channel.unsubscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
@@ -128,6 +137,15 @@ export function PlayerLobby({
       client.close();
     };
   }, [pin, playerId]);
+
+  // Safety-net auto-clear matching the server's own wait (questions.ts sleeps
+  // for the same displayMs before broadcasting question_start) — covers the
+  // case where that broadcast is ever delayed or dropped.
+  useEffect(() => {
+    if (!activeQuote) return;
+    const timer = setTimeout(() => setActiveQuote(null), activeQuote.displayMs);
+    return () => clearTimeout(timer);
+  }, [activeQuote]);
 
   // Story 5.2: fetch our own rank once a question locks — a plain
   // authenticated GET is as private as this needs to be (see the rank
@@ -207,6 +225,7 @@ export function PlayerLobby({
     const points = mine?.points ?? myRank?.points;
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
+        {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
         <h1 className="text-4xl">Game Over</h1>
         {rank !== undefined && (
           <div className="card flex flex-col items-center gap-2 px-10 py-8">
@@ -230,6 +249,7 @@ export function PlayerLobby({
 
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
+        {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
         {showTimer && optionsVisible && <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>}
         <h1 className="max-w-md text-2xl">{question.question}</h1>
         {!optionsVisible ? (
@@ -326,6 +346,7 @@ export function PlayerLobby({
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
+      {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
       <p className="font-serif text-2xl text-brand-ink">Hi, {nickname}!</p>
       {gameStarted ? (
         <p className="text-ink-soft">Game in progress — waiting for the next question…</p>
