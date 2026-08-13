@@ -118,10 +118,14 @@ export function QuizDraftCard({ quiz }: { quiz: { id: string; title: string; que
               quizId={quiz.id}
               question={question}
               index={index}
+              canDelete={questions.length > 1}
               onSaved={(updated) =>
                 setQuestions((current) =>
                   current.map((q) => (q.id === question.id ? { ...q, ...updated } : q))
                 )
+              }
+              onDeleted={() =>
+                setQuestions((current) => current.filter((q) => q.id !== question.id))
               }
             />
           ))}

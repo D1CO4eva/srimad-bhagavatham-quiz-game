@@ -80,3 +80,50 @@ export async function PATCH(
 
   return Response.json(updated);
 }
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string; questionId: string }> }
+) {
+  const { id, questionId } = await params;
+
+  const question = await db.question.findUnique({
+    where: { id: questionId },
+    select: { id: true, quizId: true },
+  });
+  if (!question || question.quizId !== id) {
+    return Response.json({ error: "Question not found." }, { status: 404 });
+  }
+
+  const quiz = await db.quiz.findUnique({
+    where: { id },
+    select: { status: true, _count: { select: { questions: true } } },
+  });
+  if (!quiz) {
+    return Response.json({ error: "Quiz not found." }, { status: 404 });
+  }
+  if (quiz.status !== "DRAFT") {
+    return Response.json({ error: "Only draft quizzes can be edited." }, { status: 400 });
+  }
+  if (quiz._count.questions <= 1) {
+    return Response.json({ error: "A quiz must have at least one question." }, { status: 400 });
+  }
+
+  // Question order must stay contiguous (0..n-1) — game sessions identify the
+  // last question by `order === questions.length - 1`, which a gap would break.
+  await db.$transaction(async (tx) => {
+    await tx.question.delete({ where: { id: questionId } });
+    const remaining = await tx.question.findMany({
+      where: { quizId: id },
+      orderBy: { order: "asc" },
+      select: { id: true, order: true },
+    });
+    for (const [index, remainingQuestion] of remaining.entries()) {
+      if (remainingQuestion.order !== index) {
+        await tx.question.update({ where: { id: remainingQuestion.id }, data: { order: index } });
+      }
+    }
+  });
+
+  return Response.json({ ok: true });
+}
