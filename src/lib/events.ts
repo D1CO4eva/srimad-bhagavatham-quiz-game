@@ -22,7 +22,7 @@ export type SessionEventName = (typeof SessionEvent)[keyof typeof SessionEvent];
 export type QuestionStartPayload = {
   questionId: string;
   questionIndex: number;
-  type: "MULTIPLE_CHOICE" | "TRUE_FALSE" | "SHORT_ANSWER";
+  type: "MULTIPLE_CHOICE" | "TRUE_FALSE" | "SHORT_ANSWER" | "MULTI_SELECT";
   question: string;
   choices: string[];
   timeLimitSecs: number;
@@ -32,8 +32,8 @@ export type QuestionStartPayload = {
 };
 
 export type AnswerCountUpdatePayload = { answeredCount: number; playerCount: number };
-/** `answer` is the correct choice's text — safe to reveal now that answering is closed. */
-export type QuestionLockedPayload = { questionId: string; answer: string };
+/** `correctChoices` are the correct choice text(s) — safe to reveal now that answering is closed. */
+export type QuestionLockedPayload = { questionId: string; correctChoices: string[] };
 
 export type LeaderboardEntry = { playerId: string; nickname: string; points: number; rank: number };
 export type LeaderboardUpdatePayload = { leaderboard: LeaderboardEntry[] };

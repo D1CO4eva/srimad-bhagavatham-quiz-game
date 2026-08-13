@@ -59,7 +59,7 @@ export function HostLobby({
 
   const [question, setQuestion] = useState<QuestionStartPayload | null>(initialQuestion);
   const [locked, setLocked] = useState(initialLocked);
-  const [revealedAnswer, setRevealedAnswer] = useState<string | null>(null);
+  const [revealedAnswers, setRevealedAnswers] = useState<string[] | null>(null);
   const [answeredCount, setAnsweredCount] = useState(initialAnsweredCount);
   const [playerCount, setPlayerCount] = useState(initialPlayerCount);
   const [isAdvancing, setIsAdvancing] = useState(false);
@@ -112,7 +112,7 @@ export function HostLobby({
       const data = message.data as QuestionStartPayload;
       setQuestion(data);
       setLocked(false);
-      setRevealedAnswer(null);
+      setRevealedAnswers(null);
       setFrozenRemaining(null);
       setAnsweredCount(0);
       setLeaderboard(null);
@@ -127,7 +127,7 @@ export function HostLobby({
       const data = message.data as QuestionLockedPayload;
       setLocked(true);
       setFrozenRemaining(liveRemainingRef.current);
-      setRevealedAnswer(data.answer);
+      setRevealedAnswers(data.correctChoices);
     };
     const onLeaderboardUpdate = (message: InboundMessage) => {
       setLeaderboard((message.data as LeaderboardUpdatePayload).leaderboard);
@@ -316,8 +316,8 @@ export function HostLobby({
             {showTimer && <p className="font-serif text-6xl font-bold text-brand">{remaining}</p>}
             <ul className="grid w-full grid-cols-2 gap-3">
               {question.choices.map((choice, index) => {
-                const isCorrect = revealedAnswer !== null && choice === revealedAnswer;
-                const isRevealed = revealedAnswer !== null;
+                const isRevealed = revealedAnswers !== null;
+                const isCorrect = isRevealed && revealedAnswers.includes(choice);
                 return (
                   <li
                     key={index}

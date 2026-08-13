@@ -27,7 +27,7 @@ export default async function HostPage() {
             type: true,
             question: true,
             choices: true,
-            answer: true,
+            correctChoices: true,
             timeLimitSecs: true,
           },
         },

@@ -14,6 +14,9 @@ enum QuestionType {
   MULTIPLE_CHOICE
   TRUE_FALSE
   SHORT_ANSWER
+  /// Same tap-to-answer UI as MULTIPLE_CHOICE, but the player can select more
+  /// than one box; graded with partial credit (see Answer.choiceIndices).
+  MULTI_SELECT
 }
 
 enum GameSessionStatus {
@@ -59,17 +62,19 @@ model Quiz {
 }
 
 model Question {
-  id            String       @id @default(cuid())
-  quizId        String
-  quiz          Quiz         @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  order         Int
-  type          QuestionType
-  question      String
+  id             String       @id @default(cuid())
+  quizId         String
+  quiz           Quiz         @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  order          Int
+  type           QuestionType
+  question       String
   /// Answer choices. Empty for SHORT_ANSWER.
-  choices       String[]
-  answer        String
-  explanation   String       @default("")
-  timeLimitSecs Int          @default(20)
+  choices        String[]
+  /// Correct choice text(s) — exactly one entry for MULTIPLE_CHOICE/TRUE_FALSE,
+  /// two or more for MULTI_SELECT.
+  correctChoices String[]
+  explanation    String       @default("")
+  timeLimitSecs  Int          @default(20)
 
   @@unique([quizId, order])
 }
@@ -124,20 +129,21 @@ model Player {
 }
 
 model GameSessionQuestion {
-  id            String       @id @default(cuid())
-  gameSessionId String
-  gameSession   GameSession  @relation(fields: [gameSessionId], references: [id], onDelete: Cascade)
-  order         Int
-  type          QuestionType
-  question      String
-  choices       String[]
-  answer        String
-  explanation   String       @default("")
-  timeLimitSecs Int
+  id             String       @id @default(cuid())
+  gameSessionId  String
+  gameSession    GameSession  @relation(fields: [gameSessionId], references: [id], onDelete: Cascade)
+  order          Int
+  type           QuestionType
+  question       String
+  choices        String[]
+  /// Correct choice text(s) — see Question.correctChoices.
+  correctChoices String[]
+  explanation    String       @default("")
+  timeLimitSecs  Int
 
   /// Set when the host advances to this question (Story 3.1); the question
   /// text is shown to players from this moment.
-  startedAt DateTime?
+  startedAt         DateTime?
   /// Set alongside startedAt to startedAt + leadTimeSecs: answer choices
   /// stay hidden/disabled and the answer deadline doesn't start ticking
   /// until this moment, giving players a beat to read the question first.
@@ -146,7 +152,7 @@ model GameSessionQuestion {
   /// timer reaching zero (Story 3.5). The deadline check in answer
   /// submission (startedAt + timeLimitSecs) is the real authority (Story
   /// 3.3) — this is a UI signal, not the source of truth.
-  lockedAt  DateTime?
+  lockedAt          DateTime?
 
   answers Answer[]
 
@@ -159,9 +165,10 @@ model Answer {
   gameSessionQuestion   GameSessionQuestion @relation(fields: [gameSessionQuestionId], references: [id], onDelete: Cascade)
   playerId              String
   player                Player              @relation(fields: [playerId], references: [id], onDelete: Cascade)
-  /// Index into GameSessionQuestion.choices. Only MULTIPLE_CHOICE/TRUE_FALSE
-  /// questions are answerable from the live tap UI (Story 3.2/3.4).
-  choiceIndex           Int
+  /// Index(es) into GameSessionQuestion.choices. A single-element array for
+  /// MULTIPLE_CHOICE/TRUE_FALSE, one or more for MULTI_SELECT. Only these
+  /// question types are answerable from the live tap UI (Story 3.2/3.4).
+  choiceIndices         Int[]
   serverReceivedAt      DateTime            @default(now())
 
   /// Graded at submission time (Story 4.1-4.3) using only server-received

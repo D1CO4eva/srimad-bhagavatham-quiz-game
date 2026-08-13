@@ -46,7 +46,7 @@ export async function POST(request: Request) {
                 type: question.type === "true_false" ? "TRUE_FALSE" : "MULTIPLE_CHOICE",
                 question: question.question,
                 choices: question.choices,
-                answer: question.answer,
+                correctChoices: [question.answer],
                 explanation: question.explanation,
               })),
             },
@@ -57,7 +57,15 @@ export async function POST(request: Request) {
             status: true,
             questions: {
               orderBy: { order: "asc" },
-              select: { id: true, order: true, type: true, question: true, choices: true, answer: true, explanation: true },
+              select: {
+                id: true,
+                order: true,
+                type: true,
+                question: true,
+                choices: true,
+                correctChoices: true,
+                explanation: true,
+              },
             },
           },
         });

@@ -8,17 +8,25 @@ export async function POST(
   const body = await request.json().catch(() => null);
   const playerId = typeof body?.playerId === "string" ? body.playerId : null;
   const questionId = typeof body?.questionId === "string" ? body.questionId : null;
-  const choiceIndex = Number(body?.choiceIndex);
+  const choiceIndices = Array.isArray(body?.choiceIndices)
+    ? body.choiceIndices.map((i: unknown) => Number(i))
+    : null;
 
-  if (!playerId || !questionId || !Number.isInteger(choiceIndex)) {
+  if (
+    !playerId ||
+    !questionId ||
+    !choiceIndices ||
+    choiceIndices.length === 0 ||
+    !choiceIndices.every((i: number) => Number.isInteger(i))
+  ) {
     return Response.json(
-      { error: "playerId, questionId, and an integer choiceIndex are required." },
+      { error: "playerId, questionId, and a non-empty array of integer choiceIndices are required." },
       { status: 400 }
     );
   }
 
   try {
-    await submitAnswer(pin, playerId, questionId, choiceIndex);
+    await submitAnswer(pin, playerId, questionId, choiceIndices);
     return Response.json({ ok: true });
   } catch (error) {
     if (error instanceof AnswerRejectedError) {

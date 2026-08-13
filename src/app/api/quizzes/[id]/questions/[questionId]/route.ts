@@ -24,12 +24,12 @@ export async function PATCH(
     return Response.json({ error: "Only draft quizzes can be edited." }, { status: 400 });
   }
 
-  const data: { choices?: string[]; answer?: string; timeLimitSecs?: number } = {};
+  const data: { choices?: string[]; correctChoices?: string[]; timeLimitSecs?: number } = {};
 
   if (body?.choices !== undefined) {
-    if (question.type !== "MULTIPLE_CHOICE") {
+    if (question.type !== "MULTIPLE_CHOICE" && question.type !== "MULTI_SELECT") {
       return Response.json(
-        { error: "Only multiple-choice questions support editing choice text." },
+        { error: "Only multiple-choice/multi-select questions support editing choice text." },
         { status: 400 }
       );
     }
@@ -44,13 +44,31 @@ export async function PATCH(
     data.choices = choices;
   }
 
-  if (body?.answer !== undefined) {
-    const answer = typeof body.answer === "string" ? body.answer.trim() : "";
+  if (body?.correctChoices !== undefined) {
     const choicePool = data.choices ?? question.choices;
-    if (!answer || !choicePool.includes(answer)) {
-      return Response.json({ error: "answer must be one of the question's choices." }, { status: 400 });
+    const rawCorrectChoices: unknown[] = Array.isArray(body.correctChoices) ? body.correctChoices : [];
+    const stringCorrectChoices: string[] = rawCorrectChoices.filter(
+      (choice): choice is string => typeof choice === "string"
+    );
+    const correctChoices = [...new Set(stringCorrectChoices)];
+    const minRequired = question.type === "MULTI_SELECT" ? 2 : 1;
+    const maxAllowed = question.type === "MULTI_SELECT" ? choicePool.length : 1;
+    if (
+      correctChoices.length < minRequired ||
+      correctChoices.length > maxAllowed ||
+      !correctChoices.every((choice) => choicePool.includes(choice))
+    ) {
+      return Response.json(
+        {
+          error:
+            question.type === "MULTI_SELECT"
+              ? "correctChoices must list at least two of the question's choices."
+              : "correctChoices must contain exactly one of the question's choices.",
+        },
+        { status: 400 }
+      );
     }
-    data.answer = answer;
+    data.correctChoices = correctChoices;
   }
 
   if (body?.timeLimitSecs !== undefined) {
@@ -75,7 +93,7 @@ export async function PATCH(
   const updated = await db.question.update({
     where: { id: questionId },
     data,
-    select: { id: true, type: true, question: true, choices: true, answer: true, timeLimitSecs: true },
+    select: { id: true, type: true, question: true, choices: true, correctChoices: true, timeLimitSecs: true },
   });
 
   return Response.json(updated);

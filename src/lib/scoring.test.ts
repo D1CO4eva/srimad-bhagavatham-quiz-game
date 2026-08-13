@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BASE_POINTS,
+  computeCorrectFraction,
   computePoints,
   computeRawReactionTimeMs,
   computeTrueReactionTimeMs,
@@ -41,44 +42,88 @@ describe("computeTrueReactionTimeMs", () => {
 describe("computePoints", () => {
   const timeLimitMs = 20_000;
 
-  it("scores 0 for an incorrect answer regardless of speed", () => {
-    expect(computePoints(false, 0, timeLimitMs)).toBe(0);
-    expect(computePoints(false, timeLimitMs, timeLimitMs)).toBe(0);
+  it("scores 0 for a zero-credit answer regardless of speed", () => {
+    expect(computePoints(0, 0, timeLimitMs)).toBe(0);
+    expect(computePoints(0, timeLimitMs, timeLimitMs)).toBe(0);
   });
 
-  it("scores full BASE_POINTS for a correct, instant answer", () => {
-    expect(computePoints(true, 0, timeLimitMs)).toBe(BASE_POINTS);
+  it("scores 0 for a negative correctFraction (more wrong picks than right)", () => {
+    expect(computePoints(-0.5, 0, timeLimitMs)).toBe(0);
   });
 
-  it("scores half of BASE_POINTS for a correct answer at exactly the deadline", () => {
+  it("scores full BASE_POINTS for a fully correct, instant answer", () => {
+    expect(computePoints(1, 0, timeLimitMs)).toBe(BASE_POINTS);
+  });
+
+  it("scores half of BASE_POINTS for a fully correct answer at exactly the deadline", () => {
     // round(1000 * (1 - (20000/20000)/2)) = round(1000 * 0.5) = 500
-    expect(computePoints(true, timeLimitMs, timeLimitMs)).toBe(500);
+    expect(computePoints(1, timeLimitMs, timeLimitMs)).toBe(500);
   });
 
-  it("scores 3/4 of BASE_POINTS for a correct answer at the halfway point", () => {
+  it("scores 3/4 of BASE_POINTS for a fully correct answer at the halfway point", () => {
     // round(1000 * (1 - (10000/20000)/2)) = round(1000 * 0.75) = 750
-    expect(computePoints(true, timeLimitMs / 2, timeLimitMs)).toBe(750);
+    expect(computePoints(1, timeLimitMs / 2, timeLimitMs)).toBe(750);
   });
 
   it("matches a hand-calculated non-round-number case", () => {
     // timeLimit=15000, trueReactionTime=6000
     // round(1000 * (1 - (6000/15000)/2)) = round(1000 * (1 - 0.2)) = round(800) = 800
-    expect(computePoints(true, 6_000, 15_000)).toBe(800);
+    expect(computePoints(1, 6_000, 15_000)).toBe(800);
   });
 
   it("defaults to SPEED mode when no mode is passed", () => {
-    expect(computePoints(true, timeLimitMs, timeLimitMs)).toBe(500);
+    expect(computePoints(1, timeLimitMs, timeLimitMs)).toBe(500);
+  });
+
+  it("scales points linearly for a partial-credit multi-select answer", () => {
+    // half credit at the instant-answer full value of 1000 -> 500
+    expect(computePoints(0.5, 0, timeLimitMs)).toBe(500);
   });
 
   describe("ACCURACY mode", () => {
-    it("scores flat BASE_POINTS for a correct answer regardless of speed", () => {
-      expect(computePoints(true, 0, timeLimitMs, "ACCURACY")).toBe(BASE_POINTS);
-      expect(computePoints(true, timeLimitMs, timeLimitMs, "ACCURACY")).toBe(BASE_POINTS);
+    it("scores flat BASE_POINTS for a fully correct answer regardless of speed", () => {
+      expect(computePoints(1, 0, timeLimitMs, "ACCURACY")).toBe(BASE_POINTS);
+      expect(computePoints(1, timeLimitMs, timeLimitMs, "ACCURACY")).toBe(BASE_POINTS);
     });
 
-    it("scores 0 for an incorrect answer regardless of speed", () => {
-      expect(computePoints(false, 0, timeLimitMs, "ACCURACY")).toBe(0);
-      expect(computePoints(false, timeLimitMs, timeLimitMs, "ACCURACY")).toBe(0);
+    it("scores 0 for a zero-credit answer regardless of speed", () => {
+      expect(computePoints(0, 0, timeLimitMs, "ACCURACY")).toBe(0);
+      expect(computePoints(0, timeLimitMs, timeLimitMs, "ACCURACY")).toBe(0);
     });
+
+    it("scales flat BASE_POINTS by a partial correctFraction", () => {
+      expect(computePoints(0.5, 0, timeLimitMs, "ACCURACY")).toBe(500);
+    });
+  });
+});
+
+describe("computeCorrectFraction", () => {
+  const choices = ["A", "B", "C", "D"];
+
+  it("scores 1 for a single-select question answered correctly", () => {
+    expect(computeCorrectFraction(choices, ["B"], [1])).toBe(1);
+  });
+
+  it("scores 0 for a single-select question answered incorrectly", () => {
+    expect(computeCorrectFraction(choices, ["B"], [0])).toBe(0);
+  });
+
+  it("scores 1 for a multi-select question with every correct choice picked and nothing else", () => {
+    expect(computeCorrectFraction(choices, ["A", "C"], [0, 2])).toBe(1);
+  });
+
+  it("gives partial credit for picking only some of the correct choices", () => {
+    // 1 correct pick, 0 incorrect, out of 2 correct total -> (1-0)/2 = 0.5
+    expect(computeCorrectFraction(choices, ["A", "C"], [0])).toBe(0.5);
+  });
+
+  it("subtracts credit for incorrect picks alongside correct ones", () => {
+    // 1 correct (A), 1 incorrect (B), out of 2 correct total -> (1-1)/2 = 0
+    expect(computeCorrectFraction(choices, ["A", "C"], [0, 1])).toBe(0);
+  });
+
+  it("clamps to 0 rather than going negative when incorrect picks outweigh correct ones", () => {
+    // 0 correct, 2 incorrect (B, D), out of 1 correct total -> (0-2)/1 = -2 -> clamp 0
+    expect(computeCorrectFraction(choices, ["A"], [1, 3])).toBe(0);
   });
 });
