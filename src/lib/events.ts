@@ -12,6 +12,7 @@ export const SessionEvent = {
   LeaderboardUpdate: "leaderboard_update",
   Podium: "podium",
   SettingsUpdate: "settings_update",
+  AnswerBreakdown: "answer_breakdown",
 } as const;
 
 export type SessionEventName = (typeof SessionEvent)[keyof typeof SessionEvent];
@@ -40,3 +41,6 @@ export type PodiumPayload = { podium: LeaderboardEntry[] };
 
 /** Broadcast whenever the host flips a live setting mid-game (Story: game settings toggles). */
 export type SettingsUpdatePayload = { showLeaderboard: boolean; showTimer: boolean };
+
+/** Broadcast alongside QuestionLocked — how many answered correctly vs incorrectly (host-only chart). */
+export type AnswerBreakdownPayload = { correctCount: number; incorrectCount: number };

@@ -96,6 +96,15 @@ export async function lockCurrentQuestion(pin: string) {
   await publishToSession(pin, SessionEvent.QuestionLocked, { questionId: current.id, answer: current.answer });
   await publishLeaderboardUpdate(pin);
 
+  const breakdown = await db.answer.groupBy({
+    by: ["correct"],
+    where: { gameSessionQuestionId: current.id },
+    _count: true,
+  });
+  const correctCount = breakdown.find((row) => row.correct)?._count ?? 0;
+  const incorrectCount = breakdown.find((row) => !row.correct)?._count ?? 0;
+  await publishToSession(pin, SessionEvent.AnswerBreakdown, { correctCount, incorrectCount });
+
   const isLastQuestion = current.order === session.questions.length - 1;
   if (isLastQuestion) {
     await finalizeSession(pin);

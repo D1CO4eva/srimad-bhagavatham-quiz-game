@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createSessionRealtimeClient } from "@/lib/ably-client";
 import {
   SessionEvent,
+  type AnswerBreakdownPayload,
   type AnswerCountUpdatePayload,
   type LeaderboardEntry,
   type LeaderboardUpdatePayload,
@@ -68,6 +69,7 @@ export function HostLobby({
   const [showLeaderboard, setShowLeaderboard] = useState(initialShowLeaderboard);
   const [showTimer, setShowTimer] = useState(initialShowTimer);
   const [isTogglingSettings, setIsTogglingSettings] = useState(false);
+  const [answerBreakdown, setAnswerBreakdown] = useState<AnswerBreakdownPayload | null>(null);
 
   // Lead-time countdown: seconds until answer choices reveal. Reuses
   // useCountdown with startedAt as the base and the lead-time gap (derived
@@ -114,6 +116,7 @@ export function HostLobby({
       setFrozenRemaining(null);
       setAnsweredCount(0);
       setLeaderboard(null);
+      setAnswerBreakdown(null);
     };
     const onAnswerCountUpdate = (message: InboundMessage) => {
       const data = message.data as AnswerCountUpdatePayload;
@@ -137,6 +140,9 @@ export function HostLobby({
       setShowLeaderboard(data.showLeaderboard);
       setShowTimer(data.showTimer);
     };
+    const onAnswerBreakdown = (message: InboundMessage) => {
+      setAnswerBreakdown(message.data as AnswerBreakdownPayload);
+    };
 
     channel.subscribe(SessionEvent.PlayerJoined, onPlayerJoined);
     channel.subscribe(SessionEvent.QuestionStart, onQuestionStart);
@@ -145,6 +151,7 @@ export function HostLobby({
     channel.subscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
     channel.subscribe(SessionEvent.Podium, onPodium);
     channel.subscribe(SessionEvent.SettingsUpdate, onSettingsUpdate);
+    channel.subscribe(SessionEvent.AnswerBreakdown, onAnswerBreakdown);
 
     return () => {
       channel.unsubscribe(SessionEvent.PlayerJoined, onPlayerJoined);
@@ -154,6 +161,7 @@ export function HostLobby({
       channel.unsubscribe(SessionEvent.LeaderboardUpdate, onLeaderboardUpdate);
       channel.unsubscribe(SessionEvent.Podium, onPodium);
       channel.unsubscribe(SessionEvent.SettingsUpdate, onSettingsUpdate);
+      channel.unsubscribe(SessionEvent.AnswerBreakdown, onAnswerBreakdown);
       client.close();
     };
   }, [pin]);
@@ -333,6 +341,41 @@ export function HostLobby({
         <p className="pill-badge">
           {answeredCount} / {playerCount} answered
         </p>
+
+        {locked && answerBreakdown && (answerBreakdown.correctCount > 0 || answerBreakdown.incorrectCount > 0) && (
+          <div className="w-full max-w-sm">
+            <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Correct vs Incorrect</p>
+            {(() => {
+              const total = answerBreakdown.correctCount + answerBreakdown.incorrectCount;
+              const correctPct = Math.round((answerBreakdown.correctCount / total) * 100);
+              const incorrectPct = 100 - correctPct;
+              return (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-20 shrink-0 text-left text-sm font-semibold text-success">Correct</span>
+                    <div className="h-6 flex-1 overflow-hidden rounded-full bg-paper-deep">
+                      <div
+                        className="h-full rounded-full bg-success transition-all duration-500"
+                        style={{ width: `${correctPct}%` }}
+                      />
+                    </div>
+                    <span className="w-8 shrink-0 text-right text-sm font-semibold">{answerBreakdown.correctCount}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-20 shrink-0 text-left text-sm font-semibold text-danger">Incorrect</span>
+                    <div className="h-6 flex-1 overflow-hidden rounded-full bg-paper-deep">
+                      <div
+                        className="h-full rounded-full bg-danger transition-all duration-500"
+                        style={{ width: `${incorrectPct}%` }}
+                      />
+                    </div>
+                    <span className="w-8 shrink-0 text-right text-sm font-semibold">{answerBreakdown.incorrectCount}</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
         {showLeaderboard && locked && leaderboard && (
           <div className="w-full max-w-sm">
