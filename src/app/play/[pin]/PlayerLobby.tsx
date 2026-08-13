@@ -13,6 +13,7 @@ import {
 import { measureLatency } from "@/lib/latency";
 import { useCountdown } from "@/lib/useCountdown";
 import { ANSWER_SHAPES } from "@/lib/answerShapes";
+import { AnswerShapeIcon } from "@/components/AnswerShapeIcon";
 import { savePlayerSession } from "@/lib/playerSession";
 import type { InboundMessage } from "ably";
 
@@ -182,6 +183,7 @@ export function PlayerLobby({
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
         <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>
+        <h1 className="max-w-md text-2xl">{question.question}</h1>
         {myChoice !== null && submitError ? (
           <p className="pill-badge">{submitError}</p>
         ) : myChoice !== null && locked && revealedAnswer !== null ? (
@@ -210,12 +212,15 @@ export function PlayerLobby({
                 type="button"
                 disabled={disabled}
                 onClick={() => handleAnswer(index)}
-                className={`aspect-square rounded-2xl text-white shadow-lg transition-all duration-500 ${opacityClass} ${
+                className={`flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl px-3 py-4 text-center text-xl font-semibold text-white shadow-lg transition-all duration-500 ${opacityClass} ${
                   isCorrectChoice ? "ring-4 ring-success" : ""
                 }`}
                 style={{ backgroundColor: shape.color }}
                 aria-label={shape.label}
-              />
+              >
+                <AnswerShapeIcon label={shape.label} className="h-6 w-6 shrink-0" />
+                <span className="answer-tile-text">{choice}</span>
+              </button>
             );
           })}
         </div>
