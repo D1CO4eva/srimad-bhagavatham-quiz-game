@@ -10,6 +10,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     showLeaderboardDefault?: boolean;
     showTimerDefault?: boolean;
     scoringMode?: "SPEED" | "ACCURACY";
+    leadTimeSecs?: number;
   } = {};
 
   if (body?.title !== undefined) {
@@ -32,6 +33,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
   if (body?.scoringMode === "SPEED" || body?.scoringMode === "ACCURACY") {
     data.scoringMode = body.scoringMode;
+  }
+  if (typeof body?.leadTimeSecs === "number") {
+    if (!Number.isInteger(body.leadTimeSecs) || body.leadTimeSecs < 0 || body.leadTimeSecs > 30) {
+      return Response.json({ error: "leadTimeSecs must be an integer between 0 and 30." }, { status: 400 });
+    }
+    data.leadTimeSecs = body.leadTimeSecs;
   }
 
   if (Object.keys(data).length === 0) {

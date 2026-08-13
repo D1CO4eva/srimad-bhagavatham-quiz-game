@@ -50,6 +50,7 @@ export async function createGameSession(quizId: string) {
       showLeaderboard: quiz.showLeaderboardDefault,
       showTimer: quiz.showTimerDefault,
       scoringMode: quiz.scoringMode,
+      leadTimeSecs: quiz.leadTimeSecs,
       questions: {
         create: quiz.questions.map((question) => ({
           order: question.order,
@@ -89,6 +90,7 @@ export async function startGameSession(pin: string) {
   }
 
   const startedAt = new Date();
+  const optionsRevealedAt = new Date(startedAt.getTime() + session.leadTimeSecs * 1000);
   await db.$transaction([
     db.gameSession.update({
       where: { id: session.id },
@@ -96,12 +98,12 @@ export async function startGameSession(pin: string) {
     }),
     db.gameSessionQuestion.update({
       where: { id: firstQuestion.id },
-      data: { startedAt },
+      data: { startedAt, optionsRevealedAt },
     }),
   ]);
 
   await publishToSession(pin, SessionEvent.GameStarted, {});
-  const payload = toPublicQuestion({ ...firstQuestion, startedAt });
+  const payload = toPublicQuestion({ ...firstQuestion, startedAt, optionsRevealedAt });
   await publishToSession(pin, SessionEvent.QuestionStart, payload);
   return payload;
 }

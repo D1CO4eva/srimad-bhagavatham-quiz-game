@@ -69,7 +69,17 @@ export function HostLobby({
   const [showTimer, setShowTimer] = useState(initialShowTimer);
   const [isTogglingSettings, setIsTogglingSettings] = useState(false);
 
-  const liveRemaining = useCountdown(question?.startedAt ?? null, question?.timeLimitSecs ?? 0);
+  // Lead-time countdown: seconds until answer choices reveal. Reuses
+  // useCountdown with startedAt as the base and the lead-time gap (derived
+  // from the two server timestamps) as the duration.
+  const leadDurationSecs =
+    question?.startedAt != null && question?.optionsRevealedAt != null
+      ? (question.optionsRevealedAt - question.startedAt) / 1000
+      : 0;
+  const leadRemaining = useCountdown(question?.startedAt ?? null, leadDurationSecs);
+  const optionsVisible = question !== null && leadRemaining <= 0;
+
+  const liveRemaining = useCountdown(question?.optionsRevealedAt ?? null, question?.timeLimitSecs ?? 0);
   // Frozen the instant the question locks (captured in the onQuestionLocked
   // handler below), so the displayed number stops instead of continuing to
   // tick down off the wall clock after answering has closed.
@@ -291,29 +301,35 @@ export function HostLobby({
           </div>
         </div>
         <h1 className="max-w-2xl text-4xl">{question.question}</h1>
-        {showTimer && <p className="font-serif text-6xl font-bold text-brand">{remaining}</p>}
-        <ul className="grid w-full grid-cols-2 gap-3">
-          {question.choices.map((choice, index) => {
-            const isCorrect = revealedAnswer !== null && choice === revealedAnswer;
-            const isRevealed = revealedAnswer !== null;
-            return (
-              <li
-                key={index}
-                className={`flex items-center gap-3 rounded-2xl px-5 py-4 text-left text-2xl font-semibold text-white shadow-lg transition-all duration-500 md:text-3xl ${
-                  isRevealed && !isCorrect ? "opacity-30" : ""
-                } ${isCorrect ? "ring-4 ring-success" : ""}`}
-                style={{ backgroundColor: ANSWER_SHAPES[index % ANSWER_SHAPES.length].color }}
-              >
-                <AnswerShapeIcon
-                  label={ANSWER_SHAPES[index % ANSWER_SHAPES.length].label}
-                  className="h-7 w-7 shrink-0"
-                />
-                <span className="answer-tile-text">{choice}</span>
-                {isCorrect && <span className="ml-1">✓</span>}
-              </li>
-            );
-          })}
-        </ul>
+        {!optionsVisible ? (
+          <p className="pill-badge">Answer choices in {leadRemaining}…</p>
+        ) : (
+          <>
+            {showTimer && <p className="font-serif text-6xl font-bold text-brand">{remaining}</p>}
+            <ul className="grid w-full grid-cols-2 gap-3">
+              {question.choices.map((choice, index) => {
+                const isCorrect = revealedAnswer !== null && choice === revealedAnswer;
+                const isRevealed = revealedAnswer !== null;
+                return (
+                  <li
+                    key={index}
+                    className={`flex items-center gap-3 rounded-2xl px-5 py-4 text-left text-2xl font-semibold text-white shadow-lg transition-all duration-500 md:text-3xl ${
+                      isRevealed && !isCorrect ? "opacity-30" : ""
+                    } ${isCorrect ? "ring-4 ring-success" : ""}`}
+                    style={{ backgroundColor: ANSWER_SHAPES[index % ANSWER_SHAPES.length].color }}
+                  >
+                    <AnswerShapeIcon
+                      label={ANSWER_SHAPES[index % ANSWER_SHAPES.length].label}
+                      className="h-7 w-7 shrink-0"
+                    />
+                    <span className="answer-tile-text">{choice}</span>
+                    {isCorrect && <span className="ml-1">✓</span>}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
         <p className="pill-badge">
           {answeredCount} / {playerCount} answered
         </p>
