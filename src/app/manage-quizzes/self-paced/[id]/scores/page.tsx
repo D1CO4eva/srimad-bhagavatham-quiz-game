@@ -41,7 +41,7 @@ export default async function SelfPacedScoresPage({ params }: { params: Promise<
   const summary = summarizeResponses(quiz.questions, quiz.responses);
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-8 px-6 py-16">
+    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-8 px-6 py-16 lg:max-w-5xl xl:max-w-6xl">
       <div>
         <Link href="/manage-quizzes/self-paced" className="text-sm font-semibold text-ink-soft underline">
           ‹ Back to self-paced quizzes

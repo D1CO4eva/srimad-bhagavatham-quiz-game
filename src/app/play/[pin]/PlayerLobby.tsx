@@ -251,7 +251,7 @@ export function PlayerLobby({
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
         {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
         {showTimer && optionsVisible && <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>}
-        <h1 className="max-w-md text-2xl">{question.question}</h1>
+        <h1 className="max-w-md text-2xl lg:max-w-xl">{question.question}</h1>
         {!optionsVisible ? (
           <p className="pill-badge">Get ready… {leadRemaining}</p>
         ) : myChoices.length > 0 && submitError ? (
@@ -276,7 +276,7 @@ export function PlayerLobby({
           <p className="pill-badge">Tap your answer</p>
         )}
         {optionsVisible && (
-          <div className="grid w-full max-w-sm grid-cols-2 gap-4">
+          <div className="grid w-full max-w-sm grid-cols-2 gap-4 lg:max-w-xl">
             {question.choices.map((choice, index) => {
               const shape = ANSWER_SHAPES[index % ANSWER_SHAPES.length];
               const disabled = myChoices.length > 0 || locked;
@@ -315,7 +315,7 @@ export function PlayerLobby({
           </button>
         )}
         {showLeaderboard && locked && leaderboard && (
-          <div className="w-full max-w-sm">
+          <div className="w-full max-w-sm lg:max-w-md">
             <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Top 5</p>
             <ol className="flex flex-col gap-2">
               {leaderboard.map((entry) => (

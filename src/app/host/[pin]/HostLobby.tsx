@@ -281,7 +281,7 @@ export function HostLobby({
 
   if (podium) {
     return (
-      <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-8 px-6 text-center">
+      <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-8 px-6 text-center lg:max-w-2xl xl:max-w-3xl">
         {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
         <span className="pill-badge">{quizTitle}</span>
         <h1 className="text-5xl">Final Results</h1>
@@ -307,7 +307,7 @@ export function HostLobby({
 
   if (started && question) {
     return (
-      <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center gap-6 px-6 py-16 text-center">
+      <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center gap-6 px-6 py-16 text-center lg:max-w-5xl xl:max-w-6xl">
         {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
         <div className="flex w-full items-center justify-between gap-3">
           <span className="pill-badge">
@@ -334,7 +334,7 @@ export function HostLobby({
             </label>
           </div>
         </div>
-        <h1 className="max-w-2xl text-4xl">{question.question}</h1>
+        <h1 className="max-w-2xl text-4xl lg:max-w-4xl">{question.question}</h1>
         {!optionsVisible ? (
           <p className="pill-badge">Answer choices in {leadRemaining}…</p>
         ) : (
@@ -369,7 +369,7 @@ export function HostLobby({
         </p>
 
         {locked && answerBreakdown && (answerBreakdown.correctCount > 0 || answerBreakdown.incorrectCount > 0) && (
-          <div className="w-full max-w-sm">
+          <div className="w-full max-w-sm lg:max-w-md">
             <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Correct vs Incorrect</p>
             {(() => {
               const total = answerBreakdown.correctCount + answerBreakdown.incorrectCount;
@@ -404,7 +404,7 @@ export function HostLobby({
         )}
 
         {showLeaderboard && locked && leaderboard && (
-          <div className="w-full max-w-sm">
+          <div className="w-full max-w-sm lg:max-w-md">
             <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Top 5</p>
             <ol className="flex flex-col gap-2">
               {leaderboard.map((entry) => (
@@ -436,7 +436,7 @@ export function HostLobby({
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-2xl flex-col items-center gap-8 px-6 py-16 text-center">
+    <div className="mx-auto flex min-h-screen max-w-2xl flex-col items-center gap-8 px-6 py-16 text-center lg:max-w-4xl xl:max-w-5xl">
       {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
       <div>
         <span className="pill-badge">{quizTitle}</span>
