@@ -35,7 +35,7 @@ WEEK_LABELS = {
     "week-6": "Week 6",
 }
 
-HEADING_PATTERN = re.compile(r"^\d+\.\d+[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+HEADING_PATTERN = re.compile(r"^(\d+\.\d+)[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 
 
@@ -49,12 +49,33 @@ def normalize_topic(value: str) -> str:
 
 
 def extract_topics(markdown: str) -> list[str]:
+    """Each note PDF opens with a table of contents that repeats every
+    section number right before the section itself (e.g. "6.2  Sage Narada
+    Sage - Sri Veda Vyasa Conversation" in the TOC, then "6.2  Sage Narada &
+    Sage Veda Vyasa's Conversation" as the actual heading a page later) — the
+    two listings' wording can drift slightly (typos, punctuation) even
+    though they're the same section, which produced near-duplicate topics
+    (and near-duplicate quiz questions downstream) when both were kept. Dedup
+    by section number instead of by exact text so each numbered section only
+    contributes one topic; the last occurrence wins since the in-body heading
+    (not the TOC blurb) is the more carefully worded one.
+    """
+    order: list[str] = []
+    by_number: dict[str, str] = {}
+    for match in HEADING_PATTERN.finditer(markdown):
+        number, topic = match.group(1), normalize_topic(match.group(2))
+        if not topic:
+            continue
+        if number not in by_number:
+            order.append(number)
+        by_number[number] = topic
+
     seen: set[str] = set()
     topics: list[str] = []
-    for match in HEADING_PATTERN.finditer(markdown):
-        topic = normalize_topic(match.group(1))
+    for number in order:
+        topic = by_number[number]
         key = topic.lower()
-        if topic and key not in seen:
+        if key not in seen:
             seen.add(key)
             topics.append(topic)
     return topics

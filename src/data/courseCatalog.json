@@ -6,7 +6,6 @@
       "topics": [
         "Sanatana Dharma",
         "Our Grand Shastras - Overview",
-        "Place of Puranas in Shastras",
         "Place of Itihasas & Puranas in Shastras"
       ],
       "source_documents": [
@@ -16,7 +15,6 @@
           "topics_from_headings": [
             "Sanatana Dharma",
             "Our Grand Shastras - Overview",
-            "Place of Puranas in Shastras",
             "Place of Itihasas & Puranas in Shastras"
           ]
         },
@@ -31,16 +29,16 @@
       "id": "week-2",
       "label": "Week 2",
       "topics": [
-        "Srimad Bhagavatam is the essence of all scriptures",
-        "Srimad Bhagavatam is Bhagavan Himself"
+        "Srimad Bhagavatam Is the Essence of all Scriptures",
+        "Srimad Bhagavatam Is Bhagavan Himself"
       ],
       "source_documents": [
         {
           "id": "sbcc-e-2-notes-pdf",
           "name": "SBCC E 2 Notes PDF.pdf",
           "topics_from_headings": [
-            "Srimad Bhagavatam is the essence of all scriptures",
-            "Srimad Bhagavatam is Bhagavan Himself"
+            "Srimad Bhagavatam Is the Essence of all Scriptures",
+            "Srimad Bhagavatam Is Bhagavan Himself"
           ]
         },
         {
@@ -79,9 +77,8 @@
       "id": "week-4",
       "label": "Week 4",
       "topics": [
-        "The story of Atmadeva",
-        "Lineage of Srimad Bhagavatam",
         "Story of Atmadeva",
+        "Lineage of Srimad Bhagavatam",
         "Structure of Srimad Bhagavatam"
       ],
       "source_documents": [
@@ -94,9 +91,8 @@
           "id": "week-4-eng-sb-course-2-pdf",
           "name": "Week 4-ENG-SB Course 2 PDF.pdf",
           "topics_from_headings": [
-            "The story of Atmadeva",
-            "Lineage of Srimad Bhagavatam",
             "Story of Atmadeva",
+            "Lineage of Srimad Bhagavatam",
             "Structure of Srimad Bhagavatam"
           ]
         }
@@ -106,9 +102,7 @@
       "id": "week-5",
       "label": "Week 5",
       "topics": [
-        "Deeper dive into Puranas",
-        "Srimad Bhagavatam the ‘Maha’-Purana",
-        "Canto 1 begins",
+        "Deeper Dive Into Puranas",
         "Srimad Bhagavatam Is A Mahapurana",
         "Canto 1 - Part 1"
       ],
@@ -117,9 +111,7 @@
           "id": "sbcc-e-5-notes-pdf",
           "name": "SBCC E 5 Notes PDF.pdf",
           "topics_from_headings": [
-            "Deeper dive into Puranas",
-            "Srimad Bhagavatam the ‘Maha’-Purana",
-            "Canto 1 begins",
+            "Deeper Dive Into Puranas",
             "Srimad Bhagavatam Is A Mahapurana",
             "Canto 1 - Part 1"
           ]
@@ -136,7 +128,6 @@
       "label": "Week 6",
       "topics": [
         "Canto 1 Answers",
-        "Sage Narada Sage - Sri Veda Vyasa Conversation",
         "Sage Narada & Sage Veda Vyasa’s Conversation"
       ],
       "source_documents": [
@@ -145,7 +136,6 @@
           "name": "SBCC E 6 Notes PDF.pdf",
           "topics_from_headings": [
             "Canto 1 Answers",
-            "Sage Narada Sage - Sri Veda Vyasa Conversation",
             "Sage Narada & Sage Veda Vyasa’s Conversation"
           ]
         }
