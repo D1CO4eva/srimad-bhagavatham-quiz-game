@@ -23,5 +23,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/host/:path*", "/api/quizzes/:path*"],
+  matcher: ["/host/:path*", "/manage-quizzes/:path*", "/api/quizzes/:path*"],
 };

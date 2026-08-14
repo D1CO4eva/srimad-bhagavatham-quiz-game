@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   if (!parsed.ok) {
     return Response.json({ error: parsed.error }, { status: parsed.status });
   }
-  const { questionCount, difficulty, scopeTopics, coverageLabel, sourceText, existingQuestions } = parsed.value;
+  const { questionCount, difficulty, mode, scopeTopics, coverageLabel, sourceText, existingQuestions } = parsed.value;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -41,6 +41,7 @@ export async function POST(request: Request) {
             title: generated.title,
             description: generated.description,
             status: "DRAFT",
+            mode,
             questions: {
               create: generated.questions.map((question, index) => ({
                 order: index,

@@ -16,7 +16,7 @@ export default async function HostLoginPage({
       </div>
 
       <form action={loginHostAction} className="card flex flex-col gap-4 p-6">
-        <input type="hidden" name="next" value={next ?? "/host"} />
+        <input type="hidden" name="next" value={next ?? "/manage-quizzes"} />
         <input
           type="password"
           name="passcode"

@@ -1,25 +1,25 @@
 import { db } from "@/lib/db";
-import { GenerateQuizForm } from "./GenerateQuizForm";
-import { QuizDraftCard } from "./QuizDraftCard";
-import { PublishedQuizCard } from "./PublishedQuizCard";
+import { GenerateQuizForm } from "@/app/host/GenerateQuizForm";
 import { getCourseCatalog, toPublicCourseWeeks } from "@/lib/courseCatalog";
-import { logoutHostAction } from "./login/actions";
+import { logoutHostAction } from "@/app/host/login/actions";
+import { SelfPacedDraftCard } from "./SelfPacedDraftCard";
+import { SelfPacedQuizCard } from "./SelfPacedQuizCard";
 
 export const dynamic = "force-dynamic";
 
-export default async function HostPage() {
+export default async function SelfPacedDashboardPage() {
   const [catalog, drafts, published] = await Promise.all([
     getCourseCatalog(),
     db.quiz.findMany({
-      where: { status: "DRAFT", mode: "LIVE" },
+      where: { status: "DRAFT", mode: "SELF_PACED" },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
         title: true,
-        showLeaderboardDefault: true,
-        showTimerDefault: true,
-        scoringMode: true,
-        leadTimeSecs: true,
+        slug: true,
+        responsesOpen: true,
+        opensAt: true,
+        closesAt: true,
         questions: {
           orderBy: { order: "asc" },
           select: {
@@ -34,13 +34,16 @@ export default async function HostPage() {
       },
     }),
     db.quiz.findMany({
-      where: { status: "PUBLISHED", mode: "LIVE" },
+      where: { status: "PUBLISHED", mode: "SELF_PACED" },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
         title: true,
-        description: true,
-        _count: { select: { questions: true } },
+        slug: true,
+        responsesOpen: true,
+        opensAt: true,
+        closesAt: true,
+        _count: { select: { questions: true, responses: true } },
         questions: {
           orderBy: { order: "asc" },
           select: {
@@ -60,9 +63,11 @@ export default async function HostPage() {
     <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-8 px-6 py-16">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <span className="pill-badge">Host</span>
+          <span className="pill-badge">Host · Self-Paced</span>
           <h1 className="mt-3 text-4xl">Pick a quiz</h1>
-          <p className="mt-2 text-ink-soft">Generate a new quiz, or start a live session from an existing one.</p>
+          <p className="mt-2 text-ink-soft">
+            Generate a new quiz, then publish it to get a shareable link students fill out on their own time.
+          </p>
         </div>
         <form action={logoutHostAction}>
           <button type="submit" className="text-sm font-semibold text-ink-soft underline">
@@ -71,33 +76,38 @@ export default async function HostPage() {
         </form>
       </div>
 
-      <GenerateQuizForm weeks={toPublicCourseWeeks(catalog)} />
+      <GenerateQuizForm weeks={toPublicCourseWeeks(catalog)} mode="SELF_PACED" />
 
       {drafts.length > 0 && (
         <div>
           <h2 className="text-2xl">Drafts</h2>
-          <p className="mt-1 text-sm text-ink-soft">Review, rename, and publish before these can be started.</p>
+          <p className="mt-1 text-sm text-ink-soft">Review, rename, and publish before students can take these.</p>
           <ul className="mt-3 flex flex-col gap-3">
             {drafts.map((quiz) => (
-              <QuizDraftCard key={quiz.id} quiz={quiz} />
+              <SelfPacedDraftCard key={quiz.id} quiz={quiz} />
             ))}
           </ul>
         </div>
       )}
 
       <div>
-        <h2 className="text-2xl">Quizzes ready to run</h2>
+        <h2 className="text-2xl">Published quizzes</h2>
         {published.length === 0 ? (
-          <p className="mt-2 text-ink-soft">No published quizzes yet.</p>
+          <p className="mt-2 text-ink-soft">No published self-paced quizzes yet.</p>
         ) : (
           <ul className="mt-3 flex flex-col gap-3">
             {published.map((quiz) => (
-              <PublishedQuizCard
+              <SelfPacedQuizCard
                 key={quiz.id}
                 quiz={{
                   id: quiz.id,
                   title: quiz.title,
+                  slug: quiz.slug,
+                  responsesOpen: quiz.responsesOpen,
+                  opensAt: quiz.opensAt ? quiz.opensAt.toISOString() : null,
+                  closesAt: quiz.closesAt ? quiz.closesAt.toISOString() : null,
                   questionCount: quiz._count.questions,
+                  responseCount: quiz._count.responses,
                   questions: quiz.questions,
                 }}
               />
