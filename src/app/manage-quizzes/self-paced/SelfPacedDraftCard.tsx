@@ -36,6 +36,8 @@ export function SelfPacedDraftCard({
   const [expanded, setExpanded] = useState(false);
   const [questions, setQuestions] = useState(quiz.questions);
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
+  const [opensAt, setOpensAt] = useState(quiz.opensAt ? quiz.opensAt.toISOString() : null);
+  const [closesAt, setClosesAt] = useState(quiz.closesAt ? quiz.closesAt.toISOString() : null);
 
   async function patch(body: { title?: string; publish?: boolean }) {
     const response = await fetch(`/api/quizzes/${quiz.id}`, {
@@ -149,8 +151,12 @@ export function SelfPacedDraftCard({
       <div className="border-t border-line pt-4">
         <ScheduleWindowPicker
           quizId={quiz.id}
-          initialOpensAt={quiz.opensAt ? quiz.opensAt.toISOString() : null}
-          initialClosesAt={quiz.closesAt ? quiz.closesAt.toISOString() : null}
+          initialOpensAt={opensAt}
+          initialClosesAt={closesAt}
+          onSaved={(next) => {
+            setOpensAt(next.opensAt);
+            setClosesAt(next.closesAt);
+          }}
         />
       </div>
 
