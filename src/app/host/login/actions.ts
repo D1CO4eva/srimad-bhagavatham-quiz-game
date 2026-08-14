@@ -6,8 +6,10 @@ import { HOST_SESSION_COOKIE, createHostSessionCookieValue, isCorrectPasscode } 
 
 function safeNextPath(next: FormDataEntryValue | null): string {
   const value = typeof next === "string" ? next : "";
-  // Only allow same-app relative paths under /host — never redirect off-site.
-  return value.startsWith("/host") ? value : "/host";
+  // Only allow same-app relative paths under /host or /manage-quizzes — never
+  // redirect off-site. /manage-quizzes is the default post-login landing page.
+  if (value.startsWith("/host") || value.startsWith("/manage-quizzes")) return value;
+  return "/manage-quizzes";
 }
 
 export async function loginHostAction(formData: FormData) {

@@ -21,7 +21,13 @@ function progressLabel(progress: GenerationProgress | null): string {
   return "Double-checking against the source material…";
 }
 
-export function GenerateQuizForm({ weeks }: { weeks: PublicCourseWeek[] }) {
+export function GenerateQuizForm({
+  weeks,
+  mode = "LIVE",
+}: {
+  weeks: PublicCourseWeek[];
+  mode?: "LIVE" | "SELF_PACED";
+}) {
   const router = useRouter();
   const [coverageMode, setCoverageMode] = useState<"single" | "multiple">("single");
   const [selectedWeekIds, setSelectedWeekIds] = useState<string[]>(weeks[0] ? [weeks[0].id] : []);
@@ -91,6 +97,7 @@ export function GenerateQuizForm({ weeks }: { weeks: PublicCourseWeek[] }) {
           topics: selectedTopics,
           questionCount,
           difficulty,
+          mode,
         }),
       });
 

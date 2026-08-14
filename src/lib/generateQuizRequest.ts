@@ -17,12 +17,17 @@ export const ALLOWED_QUESTION_COUNTS = new Set([5, 8, 10, 15, 20, 25, 30, 35]);
 const MAX_EXISTING_QUESTIONS_FOR_DEDUP = 150;
 
 export type Difficulty = "beginner" | "intermediate" | "advanced" | "mixed";
+export type QuizMode = "LIVE" | "SELF_PACED";
 
 export type GenerateQuizRequest = {
   weekIds: string[];
   requestedTopics: string[];
   questionCount: number;
   difficulty: Difficulty;
+  /** Which quiz experience the generated quiz is for — LIVE (Kahoot-style) or
+   * SELF_PACED (Google-Forms-style). Purely a tag on the created Quiz row;
+   * doesn't change what the generator itself produces. */
+  mode: QuizMode;
   scopeTopics: string[];
   coverageLabel: string;
   sourceText: string;
@@ -45,6 +50,7 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
     : [];
   const questionCount = Number(body?.questionCount ?? 8);
   const difficulty = typeof body?.difficulty === "string" ? body.difficulty : "mixed";
+  const mode = body?.mode === "SELF_PACED" ? "SELF_PACED" : "LIVE";
 
   if (weekIds.length === 0) {
     return { ok: false, error: "Select at least one class week.", status: 400 };
@@ -99,6 +105,7 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
       requestedTopics,
       questionCount,
       difficulty: difficulty as Difficulty,
+      mode,
       scopeTopics,
       coverageLabel,
       sourceText,
