@@ -130,6 +130,23 @@ def main() -> None:
     converter = MarkItDown(enable_plugins=False)
     weeks_out = []
 
+    # A week's top-level "topics" list drives question-generation's
+    # round-robin focus (see localQuizGenerator.ts) — it works best broken
+    # down into many specific, question-worthy facts, which is an editorial
+    # judgment call no regex over section-heading numbers can make (a course
+    # PDF might have only 2-3 numbered headings for a week that actually
+    # covers 8+ genuinely distinct facts). So once a week has been curated by
+    # hand, preserve it across rebuilds instead of clobbering it back down to
+    # the raw per-document heading union — same reasoning as
+    # MANUAL_TRANSCRIPTION_MARKER above, just at the topic-list level instead
+    # of the per-document text level. Only a week with no existing entry (a
+    # brand new week) falls back to the auto-derived union, as a starting
+    # point for its first curation pass.
+    existing_catalog: dict[str, dict] = {}
+    if CATALOG_OUT.exists():
+        for week in json.loads(CATALOG_OUT.read_text(encoding="utf-8")).get("weeks", []):
+            existing_catalog[week["id"]] = week
+
     for week_id in sorted(WEEK_LABELS, key=lambda w: int(w.split("-")[1])):
         week_dir = RAW_DIR / week_id
         if not week_dir.is_dir():
@@ -140,7 +157,7 @@ def main() -> None:
 
         week_out_dir = NOTES_OUT_DIR / week_id
         source_documents = []
-        week_topics: list[str] = []
+        auto_topics: list[str] = []
         seen_topic_keys: set[str] = set()
 
         for source in sources:
@@ -150,7 +167,10 @@ def main() -> None:
                 key = topic.lower()
                 if key not in seen_topic_keys:
                     seen_topic_keys.add(key)
-                    week_topics.append(topic)
+                    auto_topics.append(topic)
+
+        curated_topics = existing_catalog.get(week_id, {}).get("topics") or []
+        week_topics = curated_topics if curated_topics else auto_topics
 
         weeks_out.append({
             "id": week_id,
