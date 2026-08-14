@@ -177,6 +177,7 @@ export function SelfPacedDraftCard({
               onDeleted={() =>
                 setQuestions((current) => current.filter((q) => q.id !== question.id))
               }
+              showTimeLimit={false}
             />
           ))}
         </ol>

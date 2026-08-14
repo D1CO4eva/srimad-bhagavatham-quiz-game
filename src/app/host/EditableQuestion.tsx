@@ -26,6 +26,7 @@ export function EditableQuestion({
   canDelete,
   onSaved,
   onDeleted,
+  showTimeLimit = true,
 }: {
   quizId: string;
   question: Question;
@@ -33,6 +34,9 @@ export function EditableQuestion({
   canDelete: boolean;
   onSaved: (updated: { question: string; choices: string[]; correctChoices: string[]; timeLimitSecs: number }) => void;
   onDeleted: () => void;
+  /** Live quizzes use this as the per-question countdown; self-paced quizzes
+   * have no timer, so callers there pass false to hide it entirely. */
+  showTimeLimit?: boolean;
 }) {
   const [savedQuestionText, setSavedQuestionText] = useState(question.question);
   const [savedChoices, setSavedChoices] = useState(question.choices);
@@ -50,9 +54,10 @@ export function EditableQuestion({
   const isMultiSelect = question.type === "MULTI_SELECT";
   const editableChoiceText = question.type === "MULTIPLE_CHOICE" || isMultiSelect;
   const timeLimitValid =
-    Number.isInteger(timeLimitSecs) &&
-    timeLimitSecs >= MIN_TIME_LIMIT_SECS &&
-    timeLimitSecs <= MAX_TIME_LIMIT_SECS;
+    !showTimeLimit ||
+    (Number.isInteger(timeLimitSecs) &&
+      timeLimitSecs >= MIN_TIME_LIMIT_SECS &&
+      timeLimitSecs <= MAX_TIME_LIMIT_SECS);
   const dirty =
     questionText.trim() !== savedQuestionText ||
     !sameChoices(correctChoices, savedCorrectChoices) ||
@@ -105,10 +110,10 @@ export function EditableQuestion({
     setIsSaving(true);
     setError(null);
     try {
-      const body: { question: string; choices?: string[]; correctChoices: string[]; timeLimitSecs: number } = {
+      const body: { question: string; choices?: string[]; correctChoices: string[]; timeLimitSecs?: number } = {
         question: questionText.trim(),
         correctChoices,
-        timeLimitSecs,
+        ...(showTimeLimit ? { timeLimitSecs } : {}),
         ...(editableChoiceText ? { choices } : {}),
       };
       const response = await fetch(`/api/quizzes/${quizId}/questions/${question.id}`, {
@@ -188,11 +193,12 @@ export function EditableQuestion({
               aria-label={`Mark "${choice}" as a correct answer`}
             />
             {editableChoiceText ? (
-              <input
+              <textarea
                 value={choice}
                 onChange={(event) => updateChoiceText(choiceIndex, event.target.value)}
                 maxLength={200}
-                className="input-field flex-1"
+                rows={2}
+                className="input-field flex-1 resize-y"
               />
             ) : (
               <span className={correctChoices.includes(choice) ? "font-semibold text-ink" : "text-ink-soft"}>
@@ -202,22 +208,24 @@ export function EditableQuestion({
           </li>
         ))}
       </ul>
-      <label className="mt-3 flex items-center gap-2 text-xs text-ink-soft">
-        Time limit
-        <input
-          type="number"
-          min={MIN_TIME_LIMIT_SECS}
-          max={MAX_TIME_LIMIT_SECS}
-          value={timeLimitSecs}
-          onChange={(event) => {
-            setTimeLimitSecs(Number(event.target.value));
-            setError(null);
-            setJustSaved(false);
-          }}
-          className="input-field w-20"
-        />
-        seconds
-      </label>
+      {showTimeLimit && (
+        <label className="mt-3 flex items-center gap-2 text-xs text-ink-soft">
+          Time limit
+          <input
+            type="number"
+            min={MIN_TIME_LIMIT_SECS}
+            max={MAX_TIME_LIMIT_SECS}
+            value={timeLimitSecs}
+            onChange={(event) => {
+              setTimeLimitSecs(Number(event.target.value));
+              setError(null);
+              setJustSaved(false);
+            }}
+            className="input-field w-20"
+          />
+          seconds
+        </label>
+      )}
       <div className="mt-3 flex items-center gap-3">
         <button
           type="button"
