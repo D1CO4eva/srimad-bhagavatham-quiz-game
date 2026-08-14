@@ -86,10 +86,11 @@ const CORE_FACT_OVERLAP_THRESHOLD = 0.45;
 // this cap (free, no extra tokens); only the prompt text needs bounding,
 // especially once existingQuestions (prior quizzes' history) is involved.
 const MAX_AVOID_ENTRIES_IN_PROMPT = 25;
-// The whole course-notes corpus is ~70KB (see src/data/courseNotes.json) —
-// comfortably under this even if a host selects every week at once. This is
-// a safety cap against a much larger future corpus, not a normal-path limit.
-const MAX_SOURCE_TEXT_CHARS = 60_000;
+// The whole course-notes corpus is ~80KB (see src/data/courseNotes.json,
+// notes PDFs plus manually-transcribed infographics) — comfortably under
+// this even if a host selects every week at once. This is a safety cap
+// against a much larger future corpus, not a normal-path limit.
+const MAX_SOURCE_TEXT_CHARS = 150_000;
 
 export type GeneratedQuestion = {
   id: string;
