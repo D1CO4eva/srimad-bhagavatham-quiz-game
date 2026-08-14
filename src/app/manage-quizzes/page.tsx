@@ -3,7 +3,7 @@ import { logoutHostAction } from "@/app/host/login/actions";
 
 export default function ManageQuizzesPage() {
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-8 px-6 py-16">
+    <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-8 px-6 py-16 lg:max-w-4xl xl:max-w-5xl">
       <div className="flex items-start justify-between gap-4">
         <div>
           <span className="pill-badge">Host</span>

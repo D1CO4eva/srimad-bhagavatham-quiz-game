@@ -39,7 +39,7 @@ export default async function TakeQuizPage({ params }: { params: Promise<{ slug:
           ? `This quiz closed on ${quiz.closesAt?.toLocaleString()}.`
           : "This quiz has been closed by the host.";
     return (
-      <div className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center gap-4 px-6 py-16 text-center">
+      <div className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center gap-4 px-6 py-16 text-center lg:max-w-xl">
         <h1 className="text-3xl">{quiz.title}</h1>
         <p className="text-ink-soft">{message}</p>
       </div>
@@ -47,7 +47,7 @@ export default async function TakeQuizPage({ params }: { params: Promise<{ slug:
   }
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-8 px-6 py-16">
+    <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-8 px-6 py-16 lg:max-w-3xl xl:max-w-4xl">
       <TakeQuizForm slug={slug} title={quiz.title} description={quiz.description} questions={quiz.questions} />
     </div>
   );
