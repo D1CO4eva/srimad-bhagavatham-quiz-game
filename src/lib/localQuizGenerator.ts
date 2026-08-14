@@ -40,11 +40,16 @@
  * will legitimately reuse individual terms as distractors across genuinely
  * different questions — it's reusing the same answer with mostly the same
  * options that signals "this is the same question again," not just
- * touching the same topic. Checked per-slot against everything generated
- * so far (both this run's own questions and, if the caller passed
- * `existingQuestions`, prior quizzes' questions on the same material) and
- * swept again at the end since bounded concurrency lets two slots pass
- * their own check against the same stale snapshot at once.
+ * touching the same topic. True_false questions have no choices to fall
+ * back on and are often just a handful of words, so a shared-explanation
+ * check catches those instead: the explanation is a near-direct restatement
+ * of the source sentence backing the answer, so it stays similar across
+ * paraphrases even when the question stem itself was reworded enough to
+ * dodge the question-text overlap check. Checked per-slot against
+ * everything generated so far (both this run's own questions and, if the
+ * caller passed `existingQuestions`, prior quizzes' questions on the same
+ * material) and swept again at the end since bounded concurrency lets two
+ * slots pass their own check against the same stale snapshot at once.
  */
 
 import { nanoid } from "nanoid";
@@ -58,6 +63,12 @@ const CONCURRENCY = 4;
 const MULTIPLE_CHOICE_RATIO = 0.75;
 const FAITHFULNESS_THRESHOLD = 0.7;
 const DUPLICATE_OVERLAP_THRESHOLD = 0.5;
+// Slightly higher than DUPLICATE_OVERLAP_THRESHOLD: explanations in this
+// course share a lot of recurring domain vocabulary ("Bhagavan", "Vyasa",
+// "devotion", "glories", "leelas") even when they're backing genuinely
+// different facts, so a lower bar would false-positive on unrelated
+// questions that just happen to cite the same names.
+const EXPLANATION_OVERLAP_THRESHOLD = 0.55;
 // Cap on how many avoid-list entries get spelled out in the prompt text
 // itself — findDuplicate below still checks the full list regardless of
 // this cap (free, no extra tokens); only the prompt text needs bounding,
@@ -137,6 +148,7 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 /** See the module docstring for why this checks answer+choices, not just question-text similarity. */
 function findDuplicate(candidate: GeneratedQuestion, existing: GeneratedQuestion[]): GeneratedQuestion | null {
   const candidateQuestionWords = normalizeWords(candidate.question);
+  const candidateExplanationWords = normalizeWords(candidate.explanation);
   for (const other of existing) {
     if (jaccard(candidateQuestionWords, normalizeWords(other.question)) >= DUPLICATE_OVERLAP_THRESHOLD) {
       return other;
@@ -145,6 +157,19 @@ function findDuplicate(candidate: GeneratedQuestion, existing: GeneratedQuestion
       const sameAnswer = candidate.answer.trim().toLowerCase() === other.answer.trim().toLowerCase();
       const choiceOverlap = jaccard(normalizeWords(candidate.choices.join(" ")), normalizeWords(other.choices.join(" ")));
       if (sameAnswer && choiceOverlap >= DUPLICATE_OVERLAP_THRESHOLD) return other;
+    }
+    // Two questions worded very differently can still be testing the exact
+    // same underlying fact — the explanation is what actually names that
+    // fact (it's a direct restatement of the source sentence backing the
+    // answer), so it stays similar across paraphrases even when the question
+    // stem and choices are reworded enough to dodge the checks above. This
+    // is what catches the true_false case, which has no choices to compare
+    // and often only a handful of words in the question itself.
+    if (
+      candidateExplanationWords.size > 0 &&
+      jaccard(candidateExplanationWords, normalizeWords(other.explanation)) >= EXPLANATION_OVERLAP_THRESHOLD
+    ) {
+      return other;
     }
   }
   return null;
