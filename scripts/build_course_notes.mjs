@@ -16,6 +16,12 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const NOTES_DIR = join(ROOT, "content", "course-notes");
 const OUT_FILE = join(ROOT, "src", "data", "courseNotes.json");
 
+// Hand-transcribed infographic .md files (see build_course_catalog.py's
+// MANUAL_TRANSCRIPTION_MARKER) start with an HTML comment marking them as
+// such, purely for that script's own bookkeeping — it's not course content,
+// so strip it here before the text reaches a generation prompt.
+const MANUAL_TRANSCRIPTION_MARKER = /^<!--\s*manually-transcribed[^]*?-->\s*/;
+
 const notes = {};
 for (const weekDir of readdirSync(NOTES_DIR, { withFileTypes: true })) {
   if (!weekDir.isDirectory()) continue;
@@ -23,7 +29,8 @@ for (const weekDir of readdirSync(NOTES_DIR, { withFileTypes: true })) {
   for (const file of readdirSync(weekPath)) {
     if (!file.endsWith(".md")) continue;
     const docId = basename(file, ".md");
-    notes[docId] = readFileSync(join(weekPath, file), "utf8").trim();
+    const raw = readFileSync(join(weekPath, file), "utf8");
+    notes[docId] = raw.replace(MANUAL_TRANSCRIPTION_MARKER, "").trim();
   }
 }
 

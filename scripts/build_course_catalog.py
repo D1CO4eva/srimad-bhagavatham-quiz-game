@@ -81,14 +81,30 @@ def extract_topics(markdown: str) -> list[str]:
     return topics
 
 
+# Written at the top of any content/course-notes/**/*.md file that was hand
+# -transcribed (infographics: this repo has no vision model, so someone —
+# usually Claude, reading the image/PDF directly — transcribes it once and
+# it's committed). Without this check, rerunning this script would silently
+# clobber that transcription back to the generic "no OCR performed" stub for
+# images, or a jumbled raw MarkItDown extraction for text-layer PDFs whose
+# layout doesn't survive linearization (infographics are multi-column).
+MANUAL_TRANSCRIPTION_MARKER = "<!-- manually-transcribed"
+
+
 def convert_document(converter: MarkItDown, path: Path, week_out_dir: Path) -> tuple[dict, list[str]]:
+    week_out_dir.mkdir(parents=True, exist_ok=True)
+    md_path = week_out_dir / f"{slugify(path.stem)}.md"
+
+    existing = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
+    if existing.startswith(MANUAL_TRANSCRIPTION_MARKER):
+        topics = extract_topics(existing)
+        return {"id": slugify(path.stem), "name": path.name, "topics_from_headings": topics}, topics
+
     is_image = path.suffix.lower() in IMAGE_SUFFIXES
     markdown = ""
     if not is_image:
         markdown = converter.convert(str(path)).text_content.strip()
 
-    week_out_dir.mkdir(parents=True, exist_ok=True)
-    md_path = week_out_dir / f"{slugify(path.stem)}.md"
     if is_image:
         md_path.write_text(
             f"# {path.name}\n\n"
