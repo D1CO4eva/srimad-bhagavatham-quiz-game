@@ -45,11 +45,17 @@
  * check catches those instead: the explanation is a near-direct restatement
  * of the source sentence backing the answer, so it stays similar across
  * paraphrases even when the question stem itself was reworded enough to
- * dodge the question-text overlap check. Checked per-slot against
- * everything generated so far (both this run's own questions and, if the
- * caller passed `existingQuestions`, prior quizzes' questions on the same
- * material) and swept again at the end since bounded concurrency lets two
- * slots pass their own check against the same stale snapshot at once.
+ * dodge the question-text overlap check. And because this course's material
+ * restates its central themes across several different passages, even the
+ * question *and* explanation can both be reworded enough to still slip
+ * past — so each draft also carries a model-authored `core_fact`, a short
+ * canonical label for the one specific fact it tests, which is checked
+ * against prior questions' core_facts directly rather than inferring
+ * sameness from prose. Checked per-slot against everything generated so far
+ * (both this run's own questions and, if the caller passed
+ * `existingQuestions`, prior quizzes' questions on the same material) and
+ * swept again at the end since bounded concurrency lets two slots pass
+ * their own check against the same stale snapshot at once.
  */
 
 import { nanoid } from "nanoid";
@@ -69,6 +75,12 @@ const DUPLICATE_OVERLAP_THRESHOLD = 0.5;
 // different facts, so a lower bar would false-positive on unrelated
 // questions that just happen to cite the same names.
 const EXPLANATION_OVERLAP_THRESHOLD = 0.55;
+// Lower than the others: core_fact is a short, deliberately canonical
+// phrase (see GeneratedQuestion.coreFact), not free prose, so genuine
+// restatements of the same fact land much higher than coincidental overlap
+// between unrelated ones — a lower bar catches more without the false-positive
+// risk a low threshold would carry on full sentences.
+const CORE_FACT_OVERLAP_THRESHOLD = 0.45;
 // Cap on how many avoid-list entries get spelled out in the prompt text
 // itself — findDuplicate below still checks the full list regardless of
 // this cap (free, no extra tokens); only the prompt text needs bounding,
@@ -86,6 +98,17 @@ export type GeneratedQuestion = {
   choices: string[];
   answer: string;
   explanation: string;
+  /** Short canonical statement of the one specific fact/claim this question
+   * tests (e.g. "Narada's reason for urging Vyasa to compose a scripture"),
+   * self-reported by the model. Used only for in-batch/cross-quiz duplicate
+   * detection (see findDuplicate) — not persisted to the saved quiz. Two
+   * questions can be worded completely differently, with different
+   * explanations, and still both boil down to the same takeaway (this
+   * course's material restates "the point is to inspire devotion" in
+   * several different passages); asking the model to name the fact directly
+   * catches that, where word-overlap on the question/explanation text alone
+   * doesn't reliably. */
+  coreFact: string;
 };
 
 export type GeneratedQuiz = {
@@ -145,10 +168,23 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return union === 0 ? 0 : intersection / union;
 }
 
+// Below this many normalized words, Jaccard overlap is too noisy to trust as
+// a duplicate signal — e.g. two unrelated one-word explanations that happen
+// to share that one word score a perfect 1.0. Real explanations/core_facts
+// are always short sentences/phrases well above this, so it only guards
+// against degenerate input (a model returning a near-empty field).
+const MIN_WORDS_FOR_OVERLAP_CHECK = 3;
+
+function meaningfulOverlap(a: Set<string>, b: Set<string>, threshold: number): boolean {
+  if (a.size < MIN_WORDS_FOR_OVERLAP_CHECK || b.size < MIN_WORDS_FOR_OVERLAP_CHECK) return false;
+  return jaccard(a, b) >= threshold;
+}
+
 /** See the module docstring for why this checks answer+choices, not just question-text similarity. */
 function findDuplicate(candidate: GeneratedQuestion, existing: GeneratedQuestion[]): GeneratedQuestion | null {
   const candidateQuestionWords = normalizeWords(candidate.question);
   const candidateExplanationWords = normalizeWords(candidate.explanation);
+  const candidateCoreFactWords = normalizeWords(candidate.coreFact);
   for (const other of existing) {
     if (jaccard(candidateQuestionWords, normalizeWords(other.question)) >= DUPLICATE_OVERLAP_THRESHOLD) {
       return other;
@@ -165,10 +201,17 @@ function findDuplicate(candidate: GeneratedQuestion, existing: GeneratedQuestion
     // stem and choices are reworded enough to dodge the checks above. This
     // is what catches the true_false case, which has no choices to compare
     // and often only a handful of words in the question itself.
-    if (
-      candidateExplanationWords.size > 0 &&
-      jaccard(candidateExplanationWords, normalizeWords(other.explanation)) >= EXPLANATION_OVERLAP_THRESHOLD
-    ) {
+    if (meaningfulOverlap(candidateExplanationWords, normalizeWords(other.explanation), EXPLANATION_OVERLAP_THRESHOLD)) {
+      return other;
+    }
+    // Belt-and-suspenders on top of the above: a course whose central thesis
+    // ("the point of it all is devotion to Bhagavan") gets restated in
+    // several different passages can produce two questions with genuinely
+    // different question wording *and* different explanation prose that
+    // still both just test that same restated thesis. Comparing the model's
+    // own short, canonical restatement of "what fact is this testing"
+    // catches that case directly instead of hoping surface wording overlaps.
+    if (meaningfulOverlap(candidateCoreFactWords, normalizeWords(other.coreFact), CORE_FACT_OVERLAP_THRESHOLD)) {
       return other;
     }
   }
@@ -289,20 +332,30 @@ function buildUserPrompt(params: {
     lines.push(
       "Do not test the same underlying fact, reuse the same correct answer, or reuse the same answer " +
         "choices (even reordered) as any of these already-used questions — pick a different specific " +
-        "detail or aspect instead, even if it's the same general topic:",
+        "detail or aspect instead, even if it's the same general topic. This course's material restates " +
+        "its central themes (e.g. \"the point of it all is devotion to Bhagavan\") in several different " +
+        "passages — a question can be worded completely differently from one of these and still be testing " +
+        "the same fact underneath, which is exactly what to avoid; check against each one's core_fact, not " +
+        "just its question text:",
       ...params.avoidEntries.slice(0, MAX_AVOID_ENTRIES_IN_PROMPT).map((q) =>
         q.type === "multiple_choice"
-          ? `- "${q.question}" — choices: ${q.choices.join(" / ")}; answer: ${q.answer}`
-          : `- "${q.question}" — answer: ${q.answer}`
+          ? `- "${q.question}" — choices: ${q.choices.join(" / ")}; answer: ${q.answer}; core_fact: ${q.coreFact}`
+          : `- "${q.question}" — answer: ${q.answer}; core_fact: ${q.coreFact}`
       )
     );
   }
 
+  lines.push(
+    "Also include \"core_fact\": a short (5-12 word) canonical, plainly-worded restatement of the one " +
+      "specific fact or claim this question tests (e.g. \"Narada's reason for urging Vyasa to compose a " +
+      "scripture\") — not a copy of the question or answer text, just a terse label for the underlying fact, " +
+      "so it can be checked against the core_fact of already-used questions above."
+  );
   lines.push("Return JSON matching exactly this shape:");
   lines.push(
     params.type === "multiple_choice"
-      ? '{"type":"multiple_choice","question":"...","choices":["...","...","...","..."],"answer":"<one of the four choices, verbatim>","explanation":"..."}'
-      : '{"type":"true_false","question":"...","answer":"True" or "False","explanation":"..."}'
+      ? '{"type":"multiple_choice","question":"...","choices":["...","...","...","..."],"answer":"<one of the four choices, verbatim>","explanation":"...","core_fact":"..."}'
+      : '{"type":"true_false","question":"...","answer":"True" or "False","explanation":"...","core_fact":"..."}'
   );
   if (params.type === "multiple_choice") {
     lines.push(
@@ -327,6 +380,7 @@ const MultipleChoiceDraftSchema = z
     choices: z.array(z.string().trim().min(1)).length(4),
     answer: z.string().trim().min(1),
     explanation: z.string().trim().min(1),
+    core_fact: z.string().trim().min(1),
   })
   .refine((draft) => draft.choices.includes(draft.answer), {
     message: "answer must match one of the choices exactly",
@@ -337,6 +391,7 @@ const TrueFalseDraftSchema = z.object({
   question: z.string().trim().min(1),
   answer: z.enum(["True", "False"]),
   explanation: z.string().trim().min(1),
+  core_fact: z.string().trim().min(1),
 });
 
 function parseDraft(raw: string, type: QuestionType): GeneratedQuestion | null {
@@ -357,6 +412,7 @@ function parseDraft(raw: string, type: QuestionType): GeneratedQuestion | null {
       choices: result.data.choices,
       answer: result.data.answer,
       explanation: result.data.explanation,
+      coreFact: result.data.core_fact,
     };
   }
 
@@ -369,6 +425,7 @@ function parseDraft(raw: string, type: QuestionType): GeneratedQuestion | null {
     choices: ["True", "False"],
     answer: result.data.answer,
     explanation: result.data.explanation,
+    coreFact: result.data.core_fact,
   };
 }
 
@@ -430,9 +487,10 @@ function repairPrompt(reason: FailureReason, raw: string, duplicateOf?: string):
     return (
       `Here is what you sent:\n${raw}\n\n` +
       `That overlaps too much with an already-used question${duplicateOf ? ` ("${duplicateOf}")` : ""} — the ` +
-      "same underlying fact, the same correct answer, or nearly the same answer choices. Pick a different " +
-      "specific detail, term, or angle instead — it can be the same general topic, but must test something " +
-      "genuinely different. Respond again with ONLY the corrected JSON object."
+      "same underlying fact, the same correct answer, nearly the same answer choices, or the same core_fact " +
+      "as one already used, even though the wording differs. Pick a different specific detail, term, or angle " +
+      "instead — it can be the same general topic, but must test a genuinely different fact, with a different " +
+      "core_fact to match. Respond again with ONLY the corrected JSON object."
     );
   }
   if (reason === "ambiguous") {
