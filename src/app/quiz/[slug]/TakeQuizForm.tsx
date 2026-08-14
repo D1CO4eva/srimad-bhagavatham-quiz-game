@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getQuizResponseId, saveQuizResponseId } from "@/lib/quizResponseSession";
+import { COUNTRY_CODES } from "@/lib/countryCodes";
 
 type Question = {
   id: string;
@@ -187,14 +188,21 @@ export function TakeQuizForm({
           maxLength={200}
           className="input-field"
         />
-        <div className="grid grid-cols-[7rem_1fr] gap-3">
-          <input
+        <div className="grid grid-cols-[10rem_1fr] gap-3">
+          <select
             value={countryCode}
             onChange={(event) => setCountryCode(event.target.value)}
-            placeholder="+1"
-            maxLength={6}
             className="input-field"
-          />
+          >
+            <option value="" disabled>
+              Code
+            </option>
+            {COUNTRY_CODES.map((country) => (
+              <option key={country.iso2} value={country.dialCode}>
+                {country.name} ({country.dialCode})
+              </option>
+            ))}
+          </select>
           <input
             type="tel"
             value={phone}
