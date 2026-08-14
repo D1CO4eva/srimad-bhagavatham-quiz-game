@@ -62,7 +62,7 @@ describe("getCourseCatalog", () => {
     const weeks = await getCourseCatalog();
     const weekOne = weeks.find((w) => w.id === "week-1");
     expect(weekOne?.label).toBe("Week 1");
-    expect(weekOne?.topics).toContain("Sanatana Dharma");
+    expect(weekOne?.topics).toContain("Meaning and Etymology of Sanatana Dharma");
     expect(weekOne?.sourceDocuments.length).toBeGreaterThan(0);
   });
 });
