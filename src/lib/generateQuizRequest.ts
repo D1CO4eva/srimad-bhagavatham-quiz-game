@@ -96,6 +96,11 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
     choices: row.choices,
     answer: row.correctChoices[0] ?? "",
     explanation: "",
+    // Not persisted (see route.ts's save mapping) so prior quizzes' questions
+    // have none — findDuplicate's core_fact check is a no-op against these
+    // rows (empty word-set never meets the overlap threshold), same as the
+    // empty explanation above; the other checks still apply.
+    coreFact: "",
   }));
 
   return {

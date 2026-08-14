@@ -31,11 +31,11 @@ function isAnswerabilityCheck(messages: ChatMessage[]): boolean {
 // word sets and falsely trip duplicate detection) so tests that aren't
 // about duplicate detection don't accidentally trigger it.
 const MULTIPLE_CHOICE_FACTS = [
-  { question: "Who narrates the Bhagavatam to Pariksit?", choices: ["Sukadeva Goswami", "Vyasa", "Narada", "Suta"], answer: "Sukadeva Goswami" },
-  { question: "Which sage compiled the Vedas into four divisions?", choices: ["Vyasa", "Valmiki", "Narada", "Suta"], answer: "Vyasa" },
-  { question: "Who is described as the son of Vyasa in the Bhagavatam?", choices: ["Sukadeva", "Arjuna", "Yudhishthira", "Bhima"], answer: "Sukadeva" },
-  { question: "Which king heard the Bhagavatam before his death?", choices: ["Pariksit", "Yudhishthira", "Dhritarashtra", "Duryodhana"], answer: "Pariksit" },
-  { question: "Whose curse led to Pariksit's seven-day deadline?", choices: ["Shringi", "Shukadeva", "Vyasa", "Narada"], answer: "Shringi" },
+  { question: "Who narrates the Bhagavatam to Pariksit?", choices: ["Sukadeva Goswami", "Vyasa", "Narada", "Suta"], answer: "Sukadeva Goswami", core_fact: "narrator of the Bhagavatam to Pariksit" },
+  { question: "Which sage compiled the Vedas into four divisions?", choices: ["Vyasa", "Valmiki", "Narada", "Suta"], answer: "Vyasa", core_fact: "who compiled the Vedas into four divisions" },
+  { question: "Who is described as the son of Vyasa in the Bhagavatam?", choices: ["Sukadeva", "Arjuna", "Yudhishthira", "Bhima"], answer: "Sukadeva", core_fact: "identity of Vyasa's son" },
+  { question: "Which king heard the Bhagavatam before his death?", choices: ["Pariksit", "Yudhishthira", "Dhritarashtra", "Duryodhana"], answer: "Pariksit", core_fact: "which king heard the Bhagavatam before dying" },
+  { question: "Whose curse led to Pariksit's seven-day deadline?", choices: ["Shringi", "Shukadeva", "Vyasa", "Narada"], answer: "Shringi", core_fact: "who cursed Pariksit with the seven-day deadline" },
 ];
 const TRUE_FALSE_FACTS = [
   "Krishna appears within the events narrated in the Bhagavatam's tenth canto.",
@@ -43,6 +43,13 @@ const TRUE_FALSE_FACTS = [
   "Vyasa is credited with compiling the Mahabharata.",
   "Pariksit was cursed by the son of a brahmana sage.",
   "Sukadeva Goswami is described as a renunciate from birth.",
+];
+const TRUE_FALSE_CORE_FACTS = [
+  "Krishna's presence in the tenth canto",
+  "number of cantos in the Bhagavatam",
+  "Vyasa compiling the Mahabharata",
+  "who cursed Pariksit",
+  "Sukadeva Goswami's renunciate nature from birth",
 ];
 let draftCounter = 0;
 function validDraftFor(messages: ChatMessage[]): string {
@@ -55,7 +62,13 @@ function validDraftFor(messages: ChatMessage[]): string {
   }
   const index = draftCounter++ % MULTIPLE_CHOICE_FACTS.length;
   if (requestedType(messages) === "true_false") {
-    return JSON.stringify({ type: "true_false", question: TRUE_FALSE_FACTS[index], answer: "True", explanation: "Because." });
+    return JSON.stringify({
+      type: "true_false",
+      question: TRUE_FALSE_FACTS[index],
+      answer: "True",
+      explanation: "Because.",
+      core_fact: TRUE_FALSE_CORE_FACTS[index],
+    });
   }
   return JSON.stringify({ type: "multiple_choice", ...MULTIPLE_CHOICE_FACTS[index], explanation: "Because." });
 }
@@ -167,8 +180,9 @@ describe("generateQuiz", () => {
               choices: ["A", "B", "C", "D"],
               answer: "Not one of the choices",
               explanation: "E",
+              core_fact: "bad draft",
             })
-          : JSON.stringify({ type: "true_false", question: "Bad draft", answer: "Maybe", explanation: "E" });
+          : JSON.stringify({ type: "true_false", question: "Bad draft", answer: "Maybe", explanation: "E", core_fact: "bad draft" });
       }
       return validDraftFor(messages);
     });
@@ -234,6 +248,7 @@ describe("generateQuiz", () => {
         choices: ["Mukti", "Ashraya", "Sarga", "Poshanam"],
         answer: "Ashraya",
         explanation: "Because.",
+        core_fact: "Ashraya as the subject Bhagavatam directs us towards",
       })
     );
 
@@ -258,6 +273,9 @@ describe("generateQuiz", () => {
     let call = 0;
     completeChatMock.mockImplementation(async () => {
       call++;
+      // Deliberately different core_fact wording on each branch too, so this
+      // test still proves the pre-existing answer/choice-overlap check
+      // catches this case on its own, independent of the new core_fact check.
       return call % 2 === 1
         ? JSON.stringify({
             type: "multiple_choice",
@@ -265,6 +283,7 @@ describe("generateQuiz", () => {
             choices: ["Mukti", "Ashraya", "Sarga", "Poshanam"],
             answer: "Ashraya",
             explanation: "Because.",
+            core_fact: "the subject Bhagavatam directs listeners towards",
           })
         : JSON.stringify({
             type: "multiple_choice",
@@ -272,6 +291,59 @@ describe("generateQuiz", () => {
             choices: ["Ashraya", "Sarga", "Visarga", "Mukti"],
             answer: "Ashraya",
             explanation: "Because.",
+            core_fact: "Canto 10's defining lakshana",
+          });
+    });
+
+    const { generateQuiz } = await import("@/lib/localQuizGenerator");
+    const quiz = await generateQuiz({
+      topics: ["Sanatana Dharma"],
+      sourceText: "",
+      questionCount: 2,
+      difficulty: "mixed",
+      coverageLabel: "Week 1",
+    });
+
+    expect(quiz.questions).toHaveLength(1);
+  });
+
+  it("rejects two questions with unrelated wording and answers that both test the same core_fact", async () => {
+    // Reproduces the live bug this was added for: a course whose material
+    // restates its central theme ("the point is to inspire devotion") in
+    // several passages can produce two questions with different question
+    // text, different explanations, and non-matching answers/choices that
+    // still both just test that same restated theme. Only the core_fact
+    // overlap check (not question-text, explanation, or answer/choice
+    // overlap — all deliberately kept low here) should catch this pair.
+    let call = 0;
+    completeChatMock.mockImplementation(async () => {
+      call++;
+      return call % 2 === 1
+        ? JSON.stringify({
+            type: "multiple_choice",
+            question: "What prompted Sage Narada to encourage Sage Vyasa to compose a scripture describing the glories and leelas of Bhagavan?",
+            choices: [
+              "To fulfill the demand for historical accounts of ancient kings.",
+              "To help Vyasa achieve personal recognition and fame as a scholar.",
+              "To inspire devotion in the hearts of listeners by sharing his own transformative experiences.",
+              "To create a text focused solely on philosophical principles without narrative elements.",
+            ],
+            answer: "To inspire devotion in the hearts of listeners by sharing his own transformative experiences.",
+            explanation: "The passage says Narada shared his own past-life story to move Vyasa toward composing a devotional work.",
+            core_fact: "Narada's reason for urging Vyasa to compose a scripture about Bhagavan",
+          })
+        : JSON.stringify({
+            type: "multiple_choice",
+            question: "What did Sage Narada suggest as the primary purpose of composing a scripture during his conversation with Sage Vyasa?",
+            choices: [
+              "To describe the detailed genealogies of ancient kings.",
+              "To instill devotion to Bhagavan in the hearts of listeners.",
+              "To provide a comprehensive guide for performing rituals.",
+              "To document the historical events of his life.",
+            ],
+            answer: "To instill devotion to Bhagavan in the hearts of listeners.",
+            explanation: "According to the text, Narada's aim was for the scripture to awaken love for the Lord in its readers.",
+            core_fact: "Narada's stated reason for encouraging Vyasa to compose a scripture",
           });
     });
 
@@ -347,6 +419,7 @@ describe("generateQuiz", () => {
         question: "Krishna appears in Canto 1?",
         answer: "True",
         explanation: "Because.",
+        core_fact: "Krishna's appearance in Canto 1",
       })
     );
 
@@ -366,6 +439,7 @@ describe("generateQuiz", () => {
             choices: ["True", "False"],
             answer: "True",
             explanation: "",
+            coreFact: "",
           },
         ],
       })
