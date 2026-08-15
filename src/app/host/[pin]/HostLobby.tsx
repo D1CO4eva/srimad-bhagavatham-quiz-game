@@ -334,7 +334,7 @@ export function HostLobby({
             </label>
           </div>
         </div>
-        <h1 className="max-w-2xl text-4xl lg:max-w-4xl">{question.question}</h1>
+        <h1 className="max-w-2xl text-4xl break-words lg:max-w-4xl">{question.question}</h1>
         {!optionsVisible ? (
           <p className="pill-badge">Answer choices in {leadRemaining}…</p>
         ) : (
@@ -347,7 +347,7 @@ export function HostLobby({
                 return (
                   <li
                     key={index}
-                    className={`flex items-center gap-3 rounded-2xl px-5 py-4 text-left text-2xl font-semibold text-white shadow-lg transition-all duration-500 md:text-3xl ${
+                    className={`flex min-w-0 items-center gap-3 rounded-2xl px-5 py-4 text-left text-2xl font-semibold text-white shadow-lg transition-all duration-500 md:text-3xl ${
                       isRevealed && !isCorrect ? "opacity-30" : ""
                     } ${isCorrect ? "ring-4 ring-success" : ""}`}
                     style={{ backgroundColor: ANSWER_SHAPES[index % ANSWER_SHAPES.length].color }}
@@ -356,7 +356,7 @@ export function HostLobby({
                       label={ANSWER_SHAPES[index % ANSWER_SHAPES.length].label}
                       className="h-7 w-7 shrink-0"
                     />
-                    <span className="answer-tile-text">{choice}</span>
+                    <span className="answer-tile-text min-w-0 break-words">{choice}</span>
                     {isCorrect && <span className="ml-1">✓</span>}
                   </li>
                 );

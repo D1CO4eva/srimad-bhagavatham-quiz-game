@@ -47,9 +47,9 @@ export function PublishedQuizCard({
 
   return (
     <li className="card flex flex-col gap-4 p-5">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="font-serif text-xl text-brand-ink">{quiz.title}</p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="font-serif text-xl text-brand-ink break-words">{quiz.title}</p>
           <p className="text-sm text-ink-soft">
             {questions.length} question
             {questions.length === 1 ? "" : "s"}
