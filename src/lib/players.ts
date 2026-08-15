@@ -10,9 +10,10 @@ export class SessionNotJoinableError extends Error {
 }
 
 // Ably's plan caps concurrent connections at 200 — every joined player holds
-// one for the life of the session, so this is a hard ceiling, not just a
-// product choice.
-export const MAX_PLAYERS_PER_SESSION = 200;
+// one for the life of the session. Capped a bit below that hard ceiling
+// (rather than exactly at it) to leave headroom for the host's own
+// connection and any in-flight reconnects.
+export const MAX_PLAYERS_PER_SESSION = 190;
 
 export class SessionFullError extends Error {
   constructor(pin: string) {
