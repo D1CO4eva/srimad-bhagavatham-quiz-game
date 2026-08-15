@@ -278,7 +278,7 @@ export function PlayerLobby({
               // (Story: percentile when leaderboard is off).
               <p className="font-serif text-2xl text-brand-ink">
                 {percentile}
-                {ordinalSuffix(percentile!)} percentile of {total} player{total === 1 ? "" : "s"}
+                {ordinalSuffix(percentile!)} percentile
               </p>
             )}
             {showLeaderboard && <p className="font-serif text-3xl font-bold text-brand">{points} pts</p>}
