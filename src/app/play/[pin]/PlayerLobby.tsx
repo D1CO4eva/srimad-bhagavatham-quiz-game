@@ -14,14 +14,16 @@ import {
 } from "@/lib/events";
 import { measureLatency } from "@/lib/latency";
 import { useCountdown } from "@/lib/useCountdown";
-import { ANSWER_SHAPES } from "@/lib/answerShapes";
-import { AnswerShapeIcon } from "@/components/AnswerShapeIcon";
+import { ANSWER_TILE_COLORS } from "@/lib/answerShapes";
 import { QuoteOverlay } from "@/components/QuoteOverlay";
 import { savePlayerSession } from "@/lib/playerSession";
+import { Confetti } from "@/components/Confetti";
 import type { InboundMessage } from "ably";
 
 const LATENCY_REFRESH_MS = 45_000;
 const MEDALS = ["🥇", "🥈", "🥉"];
+
+type MyRank = { rank: number; points: number; totalPlayers: number; correctCount: number; answeredCount: number };
 
 export function PlayerLobby({
   pin,
@@ -29,6 +31,7 @@ export function PlayerLobby({
   nickname,
   initialGameStarted,
   initialPodium,
+  initialTotalPlayers,
   initialQuestion,
   initialLocked,
   initialMyChoices,
@@ -41,6 +44,7 @@ export function PlayerLobby({
   nickname: string;
   initialGameStarted: boolean;
   initialPodium: LeaderboardEntry[] | null;
+  initialTotalPlayers: number;
   initialQuestion: QuestionStartPayload | null;
   initialLocked: boolean;
   initialMyChoices: number[];
@@ -57,9 +61,10 @@ export function PlayerLobby({
   const [myChoices, setMyChoices] = useState<number[]>(initialMyChoices);
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [myRank, setMyRank] = useState<{ rank: number; points: number } | null>(null);
+  const [myRank, setMyRank] = useState<MyRank | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[] | null>(null);
   const [podium, setPodium] = useState<LeaderboardEntry[] | null>(initialPodium);
+  const [totalPlayers, setTotalPlayers] = useState(initialTotalPlayers);
   const [showLeaderboard, setShowLeaderboard] = useState(initialShowLeaderboard);
   const [showTimer, setShowTimer] = useState(initialShowTimer);
   const [activeQuote, setActiveQuote] = useState<QuoteDisplayPayload | null>(null);
@@ -110,7 +115,9 @@ export function PlayerLobby({
       setLeaderboard((message.data as LeaderboardUpdatePayload).leaderboard);
     };
     const onPodium = (message: InboundMessage) => {
-      setPodium((message.data as PodiumPayload).podium);
+      const data = message.data as PodiumPayload;
+      setPodium(data.podium);
+      setTotalPlayers(data.totalPlayers);
     };
     const onSettingsUpdate = (message: InboundMessage) => {
       const data = message.data as SettingsUpdatePayload;
@@ -223,17 +230,40 @@ export function PlayerLobby({
     const mine = podium.find((entry) => entry.playerId === playerId);
     const rank = mine?.rank ?? myRank?.rank;
     const points = mine?.points ?? myRank?.points;
+    const total = myRank?.totalPlayers || totalPlayers;
+    // "Top X%" — 1-indexed rank over the field, so the winner always reads
+    // as top 1% rather than top 0%.
+    const topPercent = rank !== undefined && total > 0 ? Math.max(1, Math.round((rank / total) * 100)) : null;
+    const scorePct =
+      myRank && myRank.answeredCount > 0 ? Math.round((myRank.correctCount / myRank.answeredCount) * 100) : null;
+
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
+        <Confetti />
         {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
         <h1 className="text-4xl">Game Over</h1>
+        {scorePct !== null && (
+          <p className="pill-badge">
+            {myRank!.correctCount}/{myRank!.answeredCount} correct &middot; {scorePct}%
+          </p>
+        )}
         {rank !== undefined && (
           <div className="card flex flex-col items-center gap-2 px-10 py-8">
-            <span className="text-4xl">{MEDALS[rank - 1] ?? `#${rank}`}</span>
-            <p className="font-serif text-2xl text-brand-ink">
-              You placed #{rank}
-            </p>
-            <p className="font-serif text-3xl font-bold text-brand">{points} pts</p>
+            {showLeaderboard ? (
+              <>
+                <span className="text-4xl">{MEDALS[rank - 1] ?? `#${rank}`}</span>
+                <p className="font-serif text-2xl text-brand-ink">You placed #{rank}</p>
+              </>
+            ) : (
+              // Leaderboard was off for the last question — standings (and
+              // exact point totals, which would let players back into a
+              // ranking anyway) stay private; show a percentile instead
+              // (Story: percentile when leaderboard is off).
+              <p className="font-serif text-2xl text-brand-ink">
+                Top {topPercent}% of {total} player{total === 1 ? "" : "s"}
+              </p>
+            )}
+            {showLeaderboard && <p className="font-serif text-3xl font-bold text-brand">{points} pts</p>}
           </div>
         )}
       </div>
@@ -253,7 +283,10 @@ export function PlayerLobby({
         {showTimer && optionsVisible && <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>}
         <h1 className="max-w-md text-2xl break-words lg:max-w-xl">{question.question}</h1>
         {!optionsVisible ? (
-          <p className="pill-badge">Get ready… {leadRemaining}</p>
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-xs font-bold tracking-wide text-ink-soft uppercase">Get Ready</p>
+            <p className="font-serif text-7xl font-bold text-brand">{leadRemaining}</p>
+          </div>
         ) : myChoices.length > 0 && submitError ? (
           <p className="pill-badge">{submitError}</p>
         ) : myChoices.length > 0 && locked && revealedAnswers !== null ? (
@@ -275,35 +308,60 @@ export function PlayerLobby({
         ) : (
           <p className="pill-badge">Tap your answer</p>
         )}
-        {optionsVisible && (
-          <div className="grid w-full max-w-sm grid-cols-2 gap-4 lg:max-w-xl">
-            {question.choices.map((choice, index) => {
-              const shape = ANSWER_SHAPES[index % ANSWER_SHAPES.length];
-              const disabled = myChoices.length > 0 || locked;
-              const isRevealed = revealedAnswers !== null;
-              const isCorrectChoice = isRevealed && revealedAnswers.includes(choice);
-              const isSelectedPreSubmit = isMultiSelect && myChoices.length === 0 && selectedIndices.includes(index);
-              const opacityClass = isRevealed ? (isCorrectChoice ? "" : "opacity-30") : disabled ? "opacity-40" : "";
-              return (
-                <button
-                  key={index}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => handleTileClick(index)}
-                  className={`flex min-h-24 min-w-0 flex-col items-center justify-center gap-2 rounded-2xl px-3 py-4 text-center text-xl font-semibold text-white shadow-lg transition-all duration-500 ${opacityClass} ${
-                    isCorrectChoice ? "ring-4 ring-success" : isSelectedPreSubmit ? "ring-4 ring-white" : ""
-                  }`}
-                  style={{ backgroundColor: shape.color }}
-                  aria-label={shape.label}
-                  aria-pressed={isMultiSelect ? isSelectedPreSubmit : undefined}
-                >
-                  <AnswerShapeIcon label={shape.label} className="h-6 w-6 shrink-0" />
-                  <span className="answer-tile-text min-w-0 break-words">{choice}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {/* Always mounted at full size (even before options reveal) and just
+            toggled invisible, rather than conditionally mounted — so reveal
+            never changes this screen's total height and re-triggers the
+            surrounding flex column's justify-center recentering, which used
+            to visibly jerk the question up the moment choices appeared. */}
+        <div
+          className={`grid w-full max-w-sm grid-cols-2 gap-4 lg:max-w-xl ${optionsVisible ? "" : "invisible"}`}
+          aria-hidden={!optionsVisible}
+        >
+          {question.choices.map((choice, index) => {
+            const disabled = myChoices.length > 0 || locked;
+            const isRevealed = revealedAnswers !== null;
+            const isCorrectChoice = isRevealed && revealedAnswers.includes(choice);
+            const mySelected = isMultiSelect
+              ? myChoices.length > 0
+                ? myChoices.includes(index)
+                : selectedIndices.includes(index)
+              : myChoices.includes(index);
+            // My own pick that turned out wrong, once the answer's revealed
+            // (Show what the player selected when the question locks: ✓ on
+            // the correct tile, ✗ on their own wrong pick).
+            const isMyWrongPick = isRevealed && mySelected && !isCorrectChoice;
+            const dimClass = isRevealed
+              ? isCorrectChoice || isMyWrongPick
+                ? ""
+                : "opacity-30"
+              : disabled && !mySelected
+                ? "opacity-40"
+                : "";
+            const ringClass = isCorrectChoice
+              ? "ring-4 ring-success"
+              : isMyWrongPick
+                ? "ring-4 ring-danger"
+                : mySelected && !isRevealed
+                  ? "ring-4 ring-white"
+                  : "";
+            return (
+              <button
+                key={index}
+                type="button"
+                disabled={disabled}
+                onClick={() => handleTileClick(index)}
+                className={`flex min-h-24 min-w-0 flex-col items-center justify-center gap-2 rounded-2xl px-3 py-4 text-center text-xl font-semibold text-white shadow-lg transition-all duration-500 ${dimClass} ${ringClass}`}
+                style={{ backgroundColor: ANSWER_TILE_COLORS[index % ANSWER_TILE_COLORS.length] }}
+                aria-label={`Option ${index + 1}: ${choice}`}
+                aria-pressed={isMultiSelect ? mySelected : undefined}
+              >
+                <span className="answer-tile-text min-w-0 break-words">{choice}</span>
+                {isCorrectChoice && <span>✓</span>}
+                {isMyWrongPick && <span>✗</span>}
+              </button>
+            );
+          })}
+        </div>
         {isMultiSelect && optionsVisible && myChoices.length === 0 && (
           <button
             type="button"
@@ -316,7 +374,7 @@ export function PlayerLobby({
         )}
         {showLeaderboard && locked && leaderboard && (
           <div className="w-full max-w-sm lg:max-w-md">
-            <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Top 5</p>
+            <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Top 10</p>
             <ol className="flex flex-col gap-2">
               {leaderboard.map((entry) => (
                 <li

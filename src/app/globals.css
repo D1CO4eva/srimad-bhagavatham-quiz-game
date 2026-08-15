@@ -203,6 +203,19 @@ input:focus-visible {
   }
 }
 
+/* Confetti.tsx sets --confetti-drift/--confetti-rotate per piece so every
+   piece falls at its own angle/speed off this one shared keyframe. */
+@keyframes confetti-fall {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--confetti-drift), 110vh) rotate(var(--confetti-rotate));
+    opacity: 0.9;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

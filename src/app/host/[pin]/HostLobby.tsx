@@ -16,9 +16,9 @@ import {
   type SettingsUpdatePayload,
 } from "@/lib/events";
 import { useCountdown } from "@/lib/useCountdown";
-import { ANSWER_SHAPES } from "@/lib/answerShapes";
-import { AnswerShapeIcon } from "@/components/AnswerShapeIcon";
+import { ANSWER_TILE_COLORS } from "@/lib/answerShapes";
 import { QuoteOverlay } from "@/components/QuoteOverlay";
+import { Confetti } from "@/components/Confetti";
 import type { InboundMessage } from "ably";
 
 type Player = { id: string; nickname: string };
@@ -229,6 +229,14 @@ export function HostLobby({
     await fetch(`/api/sessions/${pin}/lock`, { method: "POST" }).catch(() => {});
   }
 
+  function handleSkipQuote() {
+    // Clears immediately client-side for responsiveness; the server's own
+    // question_start broadcast (once its wait ends) is what actually
+    // replaces this for every client, including the host.
+    setActiveQuote(null);
+    fetch(`/api/sessions/${pin}/skip-quote`, { method: "POST" }).catch(() => {});
+  }
+
   async function handleToggleSetting(setting: "showLeaderboard" | "showTimer") {
     const next = setting === "showLeaderboard" ? !showLeaderboard : !showTimer;
     setIsTogglingSettings(true);
@@ -282,7 +290,10 @@ export function HostLobby({
   if (podium) {
     return (
       <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-8 px-6 text-center lg:max-w-2xl xl:max-w-3xl">
-        {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
+        <Confetti />
+        {activeQuote && (
+          <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} onSkip={handleSkipQuote} />
+        )}
         <span className="pill-badge">{quizTitle}</span>
         <h1 className="text-5xl">Final Results</h1>
         <p className="pill-badge">Game has ended</p>
@@ -308,7 +319,9 @@ export function HostLobby({
   if (started && question) {
     return (
       <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center gap-6 px-6 py-16 text-center lg:max-w-5xl xl:max-w-6xl">
-        {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
+        {activeQuote && (
+          <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} onSkip={handleSkipQuote} />
+        )}
         <div className="flex w-full items-center justify-between gap-3">
           <span className="pill-badge">
             Question {question.questionIndex + 1} of {questionCount}
@@ -336,7 +349,10 @@ export function HostLobby({
         </div>
         <h1 className="max-w-2xl text-4xl break-words lg:max-w-4xl">{question.question}</h1>
         {!optionsVisible ? (
-          <p className="pill-badge">Answer choices in {leadRemaining}…</p>
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-xs font-bold tracking-wide text-ink-soft uppercase">Get Ready</p>
+            <p className="font-serif text-8xl font-bold text-brand">{leadRemaining}</p>
+          </div>
         ) : (
           <>
             {showTimer && <p className="font-serif text-6xl font-bold text-brand">{remaining}</p>}
@@ -350,12 +366,8 @@ export function HostLobby({
                     className={`flex min-w-0 items-center gap-3 rounded-2xl px-5 py-4 text-left text-2xl font-semibold text-white shadow-lg transition-all duration-500 md:text-3xl ${
                       isRevealed && !isCorrect ? "opacity-30" : ""
                     } ${isCorrect ? "ring-4 ring-success" : ""}`}
-                    style={{ backgroundColor: ANSWER_SHAPES[index % ANSWER_SHAPES.length].color }}
+                    style={{ backgroundColor: ANSWER_TILE_COLORS[index % ANSWER_TILE_COLORS.length] }}
                   >
-                    <AnswerShapeIcon
-                      label={ANSWER_SHAPES[index % ANSWER_SHAPES.length].label}
-                      className="h-7 w-7 shrink-0"
-                    />
                     <span className="answer-tile-text min-w-0 break-words">{choice}</span>
                     {isCorrect && <span className="ml-1">✓</span>}
                   </li>
@@ -403,9 +415,35 @@ export function HostLobby({
           </div>
         )}
 
+        {locked && answerBreakdown && answerBreakdown.choiceCounts.some((count) => count > 0) && (
+          <div className="w-full max-w-sm lg:max-w-md">
+            <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Answers by Choice</p>
+            {(() => {
+              const maxCount = Math.max(...answerBreakdown.choiceCounts, 1);
+              return (
+                <div className="flex h-32 items-end justify-center gap-3">
+                  {answerBreakdown.choiceCounts.map((count, index) => (
+                    <div key={index} className="flex h-full flex-1 flex-col items-center justify-end gap-1">
+                      <span className="text-xs font-semibold text-ink-soft">{count}</span>
+                      <div
+                        className="w-full rounded-t-lg transition-all duration-500"
+                        style={{
+                          height: `${(count / maxCount) * 100}%`,
+                          minHeight: count > 0 ? "6%" : "2%",
+                          backgroundColor: ANSWER_TILE_COLORS[index % ANSWER_TILE_COLORS.length],
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         {showLeaderboard && locked && leaderboard && (
           <div className="w-full max-w-sm lg:max-w-md">
-            <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Top 5</p>
+            <p className="mb-2 text-sm font-bold tracking-wide text-ink-soft uppercase">Top 10</p>
             <ol className="flex flex-col gap-2">
               {leaderboard.map((entry) => (
                 <li key={entry.playerId} className="card flex items-center justify-between gap-3 px-5 py-3">

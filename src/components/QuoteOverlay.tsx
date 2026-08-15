@@ -5,7 +5,17 @@
  * Host and player screens both render this off the same `quote_display`
  * Ably broadcast, so everyone sees the same quote at the same time.
  */
-export function QuoteOverlay({ quote, attribution }: { quote: string; attribution: string }) {
+export function QuoteOverlay({
+  quote,
+  attribution,
+  onSkip,
+}: {
+  quote: string;
+  attribution: string;
+  /** Host-only: renders a "Next" button that ends the quote early instead of
+   * waiting out its full display duration. Omitted on the player screen. */
+  onSkip?: () => void;
+}) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-ink/95 px-8 backdrop-blur-sm">
       <div className="flex max-w-xl flex-col items-center gap-5 text-center animate-[rise_0.5s_ease]">
@@ -14,6 +24,11 @@ export function QuoteOverlay({ quote, attribution }: { quote: string; attributio
           &ldquo;{quote}&rdquo;
         </p>
         <p className="text-xs font-semibold tracking-wide text-gold-soft uppercase">— {attribution}</p>
+        {onSkip && (
+          <button type="button" onClick={onSkip} className="btn btn-secondary mt-2">
+            Next
+          </button>
+        )}
       </div>
     </div>
   );
