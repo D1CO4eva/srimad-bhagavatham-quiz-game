@@ -9,6 +9,18 @@ export class SessionNotJoinableError extends Error {
   }
 }
 
+// Ably's plan caps concurrent connections at 200 — every joined player holds
+// one for the life of the session, so this is a hard ceiling, not just a
+// product choice.
+export const MAX_PLAYERS_PER_SESSION = 200;
+
+export class SessionFullError extends Error {
+  constructor(pin: string) {
+    super(`Session ${pin} is full (max ${MAX_PLAYERS_PER_SESSION} players).`);
+    this.name = "SessionFullError";
+  }
+}
+
 /** Appends " (2)", " (3)", ... until the nickname is free within the session. */
 async function uniqueNickname(gameSessionId: string, requested: string): Promise<string> {
   const existing = await db.player.findMany({
@@ -37,6 +49,9 @@ export async function joinSession(pin: string, requestedNickname: string) {
     select: { id: true, pin: true, status: true },
   });
   if (!session) throw new SessionNotJoinableError(pin);
+
+  const existingCount = await db.player.count({ where: { gameSessionId: session.id } });
+  if (existingCount >= MAX_PLAYERS_PER_SESSION) throw new SessionFullError(pin);
 
   const nickname = await uniqueNickname(session.id, requestedNickname);
   const player = await db.player.create({
