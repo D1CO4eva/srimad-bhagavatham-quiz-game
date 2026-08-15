@@ -50,6 +50,7 @@ export async function POST(request: Request) {
                 choices: question.choices,
                 correctChoices: [question.answer],
                 explanation: question.explanation,
+                timeLimitSecs: question.timeLimitSecs,
               })),
             },
           },

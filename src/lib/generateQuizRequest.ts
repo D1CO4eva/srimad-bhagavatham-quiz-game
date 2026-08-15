@@ -87,7 +87,7 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
     where: { type: { in: ["MULTIPLE_CHOICE", "TRUE_FALSE"] } },
     orderBy: { quiz: { createdAt: "desc" } },
     take: MAX_EXISTING_QUESTIONS_FOR_DEDUP,
-    select: { id: true, type: true, question: true, choices: true, correctChoices: true },
+    select: { id: true, type: true, question: true, choices: true, correctChoices: true, timeLimitSecs: true },
   });
   const existingQuestions: GeneratedQuestion[] = existingQuestionRows.map((row) => ({
     id: row.id,
@@ -101,6 +101,9 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
     // rows (empty word-set never meets the overlap threshold), same as the
     // empty explanation above; the other checks still apply.
     coreFact: "",
+    // Only used for findDuplicate's avoid-list — timing is never derived
+    // from these rows, so the actual stored value doesn't matter here.
+    timeLimitSecs: row.timeLimitSecs,
   }));
 
   return {
