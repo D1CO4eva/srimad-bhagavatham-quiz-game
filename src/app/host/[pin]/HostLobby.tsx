@@ -293,17 +293,26 @@ export function HostLobby({
         <span className="pill-badge">{quizTitle}</span>
         <h1 className="text-5xl">Final Results</h1>
         <p className="pill-badge">Game has ended</p>
-        <ol className="flex w-full flex-col gap-3">
-          {podium.map((entry) => (
-            <li key={entry.playerId} className="card flex items-center justify-between gap-4 px-6 py-5">
-              <span className="flex items-center gap-3 font-serif text-xl text-brand-ink">
-                <span className="text-2xl">{MEDALS[entry.rank - 1] ?? `#${entry.rank}`}</span>
-                {entry.nickname}
-              </span>
-              <span className="font-serif text-2xl font-bold text-brand">{entry.points}</span>
-            </li>
-          ))}
-        </ol>
+        {showLeaderboard ? (
+          <ol className="flex w-full flex-col gap-3">
+            {podium.map((entry) => (
+              <li key={entry.playerId} className="card flex items-center justify-between gap-4 px-6 py-5">
+                <span className="flex items-center gap-3 font-serif text-xl text-brand-ink">
+                  <span className="text-2xl">{MEDALS[entry.rank - 1] ?? `#${entry.rank}`}</span>
+                  {entry.nickname}
+                </span>
+                <span className="font-serif text-2xl font-bold text-brand">{entry.points}</span>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          // Leaderboard was off for the last question — keep names/points/
+          // rank off the host's own screen too, not just the players', since
+          // this is often what's projected for the whole room.
+          <p className="card px-6 py-5 text-ink-soft">
+            {playerCount} player{playerCount === 1 ? "" : "s"} played — results were kept private (leaderboard was off).
+          </p>
+        )}
         {error && <p className="text-sm text-danger">{error}</p>}
         <Link href="/host" className="btn btn-primary">
           Go back to home page
