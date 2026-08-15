@@ -92,9 +92,9 @@ export function SelfPacedQuizCard({
 
   return (
     <li className="card flex flex-col gap-4 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="font-serif text-xl text-brand-ink">{quiz.title}</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="font-serif text-xl text-brand-ink break-words">{quiz.title}</p>
           <p className="text-sm text-ink-soft">
             {quiz.questionCount} question{quiz.questionCount === 1 ? "" : "s"} · {quiz.responseCount} response
             {quiz.responseCount === 1 ? "" : "s"} · {STATUS_LABEL[windowState]}

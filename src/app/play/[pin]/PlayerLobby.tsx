@@ -251,7 +251,7 @@ export function PlayerLobby({
       <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 text-center">
         {activeQuote && <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} />}
         {showTimer && optionsVisible && <p className="font-serif text-5xl font-bold text-brand">{remaining}</p>}
-        <h1 className="max-w-md text-2xl lg:max-w-xl">{question.question}</h1>
+        <h1 className="max-w-md text-2xl break-words lg:max-w-xl">{question.question}</h1>
         {!optionsVisible ? (
           <p className="pill-badge">Get ready… {leadRemaining}</p>
         ) : myChoices.length > 0 && submitError ? (
@@ -290,7 +290,7 @@ export function PlayerLobby({
                   type="button"
                   disabled={disabled}
                   onClick={() => handleTileClick(index)}
-                  className={`flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl px-3 py-4 text-center text-xl font-semibold text-white shadow-lg transition-all duration-500 ${opacityClass} ${
+                  className={`flex min-h-24 min-w-0 flex-col items-center justify-center gap-2 rounded-2xl px-3 py-4 text-center text-xl font-semibold text-white shadow-lg transition-all duration-500 ${opacityClass} ${
                     isCorrectChoice ? "ring-4 ring-success" : isSelectedPreSubmit ? "ring-4 ring-white" : ""
                   }`}
                   style={{ backgroundColor: shape.color }}
@@ -298,7 +298,7 @@ export function PlayerLobby({
                   aria-pressed={isMultiSelect ? isSelectedPreSubmit : undefined}
                 >
                   <AnswerShapeIcon label={shape.label} className="h-6 w-6 shrink-0" />
-                  <span className="answer-tile-text">{choice}</span>
+                  <span className="answer-tile-text min-w-0 break-words">{choice}</span>
                 </button>
               );
             })}
