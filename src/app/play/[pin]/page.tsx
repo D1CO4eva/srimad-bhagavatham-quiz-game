@@ -67,6 +67,10 @@ export default async function PlayPage({
           rank: result.rank,
         }))
       : null;
+  const initialTotalPlayers =
+    gameSession.status === "COMPLETED"
+      ? await db.sessionResult.count({ where: { gameSessionId: gameSession.id } })
+      : 0;
 
   return (
     <PlayerLobby
@@ -75,6 +79,7 @@ export default async function PlayPage({
       nickname={nickname}
       initialGameStarted={gameSession.status === "ACTIVE"}
       initialPodium={initialPodium}
+      initialTotalPlayers={initialTotalPlayers}
       initialQuestion={initialQuestion}
       initialLocked={initialLocked}
       initialMyChoices={initialMyChoices}

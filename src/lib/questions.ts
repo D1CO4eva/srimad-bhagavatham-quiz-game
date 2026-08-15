@@ -15,6 +15,32 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const QUOTE_SKIP_POLL_MS = 200;
+
+function quoteSkipKey(pin: string): string {
+  return `game:${pin}:quote-skip`;
+}
+
+/** Signals a quote's display wait (see waitForQuoteOrSkip) to end early — the
+ * host's "Next" button on the quote overlay. TTL is just a safety net for a
+ * flag set after its quote has already finished waiting on its own. */
+export async function skipActiveQuote(pin: string): Promise<void> {
+  await redis.set(quoteSkipKey(pin), "1", "PX", 30_000);
+}
+
+/** Waits out a quote's display duration, polling for an early-skip signal
+ * (see skipActiveQuote) instead of a plain sleep so the host's "Next" button
+ * can end the wait early. */
+async function waitForQuoteOrSkip(pin: string, displayMs: number): Promise<void> {
+  const key = quoteSkipKey(pin);
+  const deadline = Date.now() + displayMs;
+  while (Date.now() < deadline) {
+    if (await redis.get(key)) break;
+    await sleep(Math.min(QUOTE_SKIP_POLL_MS, deadline - Date.now()));
+  }
+  await redis.del(key);
+}
+
 export class QuestionFlowError extends Error {
   constructor(message: string) {
     super(message);
@@ -71,7 +97,7 @@ export async function advanceToNextQuestion(pin: string) {
       attribution: nextQuestion.quoteAttribution,
       displayMs,
     });
-    await sleep(displayMs);
+    await waitForQuoteOrSkip(pin, displayMs);
   }
 
   const startedAt = new Date();
@@ -130,7 +156,23 @@ export async function lockCurrentQuestion(pin: string) {
   });
   const correctCount = breakdown.find((row) => row.correct)?._count ?? 0;
   const incorrectCount = breakdown.find((row) => !row.correct)?._count ?? 0;
-  await publishToSession(pin, SessionEvent.AnswerBreakdown, { correctCount, incorrectCount });
+
+  // Per-choice tally for the host's "answers by choice" bar graph. Tallied
+  // in JS rather than a groupBy — choiceIndices is an array (MULTI_SELECT
+  // can pick more than one), so a single answer can count toward more than
+  // one bucket, which Prisma's groupBy can't express directly.
+  const allAnswers = await db.answer.findMany({
+    where: { gameSessionQuestionId: current.id },
+    select: { choiceIndices: true },
+  });
+  const choiceCounts = new Array(current.choices.length).fill(0) as number[];
+  for (const answer of allAnswers) {
+    for (const choiceIndex of answer.choiceIndices) {
+      if (choiceIndex >= 0 && choiceIndex < choiceCounts.length) choiceCounts[choiceIndex]++;
+    }
+  }
+
+  await publishToSession(pin, SessionEvent.AnswerBreakdown, { correctCount, incorrectCount, choiceCounts });
 
   const isLastQuestion = current.order === session.questions.length - 1;
   if (isLastQuestion) {

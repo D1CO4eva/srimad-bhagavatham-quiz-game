@@ -43,10 +43,15 @@ export type QuestionLockedPayload = { questionId: string; correctChoices: string
 
 export type LeaderboardEntry = { playerId: string; nickname: string; points: number; rank: number };
 export type LeaderboardUpdatePayload = { leaderboard: LeaderboardEntry[] };
-export type PodiumPayload = { podium: LeaderboardEntry[] };
+/** `totalPlayers` and `showLeaderboard` (the setting's value as of the last
+ * question) let clients show a percentile instead of a raw rank when the
+ * leaderboard was toggled off (Story: percentile when leaderboard is off). */
+export type PodiumPayload = { podium: LeaderboardEntry[]; totalPlayers: number; showLeaderboard: boolean };
 
 /** Broadcast whenever the host flips a live setting mid-game (Story: game settings toggles). */
 export type SettingsUpdatePayload = { showLeaderboard: boolean; showTimer: boolean };
 
-/** Broadcast alongside QuestionLocked — how many answered correctly vs incorrectly (host-only chart). */
-export type AnswerBreakdownPayload = { correctCount: number; incorrectCount: number };
+/** Broadcast alongside QuestionLocked — how many answered correctly vs
+ * incorrectly (host-only chart), plus a per-choice tally in the same order
+ * as the question's choices (host-only "answers by choice" bar graph). */
+export type AnswerBreakdownPayload = { correctCount: number; incorrectCount: number; choiceCounts: number[] };

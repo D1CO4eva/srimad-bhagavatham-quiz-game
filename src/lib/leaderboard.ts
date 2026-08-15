@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { publishToSession } from "@/lib/ably";
 import { SessionEvent, type LeaderboardEntry as PublicLeaderboardEntry } from "@/lib/events";
 
-const TOP_N = 5;
+const TOP_N = 10;
 const PODIUM_SIZE = 3;
 
 /** Cumulative score across the whole session, per Story 5.1's leaderboard reads. */
@@ -33,17 +33,36 @@ async function getTopN(pin: string, n: number | "all"): Promise<LeaderboardEntry
   return parseWithScores(flat).map((entry, index) => ({ ...entry, rank: index + 1 }));
 }
 
-/** The player's own rank even when outside the top N, via ZREVRANK (Story 5.2). */
+/** The player's own rank even when outside the top N, via ZREVRANK (Story 5.2).
+ * Also returns totalPlayers (size of the same ZSET) so callers can derive a
+ * percentile without a second round trip. */
 export async function getPlayerRank(
   pin: string,
   playerId: string
-): Promise<{ rank: number; points: number } | null> {
-  const [rank, points] = await Promise.all([
+): Promise<{ rank: number; points: number; totalPlayers: number } | null> {
+  const [rank, points, totalPlayers] = await Promise.all([
     redis.zrevrank(leaderboardKey(pin), playerId),
     redis.zscore(leaderboardKey(pin), playerId),
+    redis.zcard(leaderboardKey(pin)),
   ]);
   if (rank === null || points === null) return null;
-  return { rank: rank + 1, points: Number(points) };
+  return { rank: rank + 1, points: Number(points), totalPlayers };
+}
+
+/** How many of the player's answers this session were correct, out of how
+ * many they've answered so far — the "X/Y correct" summary shown alongside
+ * rank (Story: show right/total regardless of whether the leaderboard is on). */
+export async function getPlayerProgress(
+  pin: string,
+  playerId: string
+): Promise<{ correctCount: number; answeredCount: number } | null> {
+  const session = await db.gameSession.findFirst({ where: { pin }, select: { id: true } });
+  if (!session) return null;
+  const [correctCount, answeredCount] = await Promise.all([
+    db.answer.count({ where: { playerId, correct: true, gameSessionQuestion: { gameSessionId: session.id } } }),
+    db.answer.count({ where: { playerId, gameSessionQuestion: { gameSessionId: session.id } } }),
+  ]);
+  return { correctCount, answeredCount };
 }
 
 async function withNicknames(entries: LeaderboardEntry[]) {
@@ -71,7 +90,7 @@ export async function publishLeaderboardUpdate(pin: string): Promise<void> {
  * session COMPLETED, and broadcasts the top-3 podium (Story 5.3).
  */
 export async function finalizeSession(pin: string): Promise<PublicLeaderboardEntry[]> {
-  const session = await db.gameSession.findFirst({ where: { pin }, select: { id: true } });
+  const session = await db.gameSession.findFirst({ where: { pin }, select: { id: true, showLeaderboard: true } });
   if (!session) return [];
 
   const full = await withNicknames(await getTopN(pin, "all"));
@@ -97,6 +116,13 @@ export async function finalizeSession(pin: string): Promise<PublicLeaderboardEnt
   ]);
 
   const podium = full.slice(0, PODIUM_SIZE);
-  await publishToSession(pin, SessionEvent.Podium, { podium });
+  // showLeaderboard as of the last question (nothing changes it after the
+  // session ends) tells clients whether to show rank badges or fall back to
+  // percentile-only standings (Story: percentile when leaderboard is off).
+  await publishToSession(pin, SessionEvent.Podium, {
+    podium,
+    totalPlayers: full.length,
+    showLeaderboard: session.showLeaderboard,
+  });
   return podium;
 }
