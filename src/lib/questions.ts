@@ -9,37 +9,6 @@ import {
   computeTrueReactionTimeMs,
 } from "@/lib/scoring";
 import { addPoints, finalizeSession, publishLeaderboardUpdate } from "@/lib/leaderboard";
-import { quoteDisplayDurationMs } from "@/lib/swamijiQuotes";
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-const QUOTE_SKIP_POLL_MS = 200;
-
-function quoteSkipKey(pin: string): string {
-  return `game:${pin}:quote-skip`;
-}
-
-/** Signals a quote's display wait (see waitForQuoteOrSkip) to end early — the
- * host's "Next" button on the quote overlay. TTL is just a safety net for a
- * flag set after its quote has already finished waiting on its own. */
-export async function skipActiveQuote(pin: string): Promise<void> {
-  await redis.set(quoteSkipKey(pin), "1", "PX", 30_000);
-}
-
-/** Waits out a quote's display duration, polling for an early-skip signal
- * (see skipActiveQuote) instead of a plain sleep so the host's "Next" button
- * can end the wait early. */
-async function waitForQuoteOrSkip(pin: string, displayMs: number): Promise<void> {
-  const key = quoteSkipKey(pin);
-  const deadline = Date.now() + displayMs;
-  while (Date.now() < deadline) {
-    if (await redis.get(key)) break;
-    await sleep(Math.min(QUOTE_SKIP_POLL_MS, deadline - Date.now()));
-  }
-  await redis.del(key);
-}
 
 export class QuestionFlowError extends Error {
   constructor(message: string) {
@@ -71,51 +40,88 @@ export function toPublicQuestion(question: {
   };
 }
 
+type QuestionRow = {
+  id: string;
+  order: number;
+  type: QuestionStartPayload["type"];
+  question: string;
+  choices: string[];
+  timeLimitSecs: number;
+  startedAt: Date | null;
+};
+
+/** Sets startedAt/optionsRevealedAt and broadcasts question_start with a
+ * server timestamp clients use to sync their countdowns (Story 3.1, 3.3). */
+async function startQuestion(pin: string, leadTimeSecs: number, question: QuestionRow) {
+  const startedAt = new Date();
+  const optionsRevealedAt = new Date(startedAt.getTime() + leadTimeSecs * 1000);
+  await db.gameSessionQuestion.update({
+    where: { id: question.id },
+    data: { startedAt, optionsRevealedAt },
+  });
+  const payload = toPublicQuestion({ ...question, startedAt, optionsRevealedAt });
+  await publishToSession(pin, SessionEvent.QuestionStart, payload);
+  return payload;
+}
+
 /**
  * Advances a session to its next question (or the first, from the lobby's
- * post-start state) and broadcasts question_start with a server timestamp
- * clients use to sync their countdowns (Story 3.1, 3.3). If the next
- * question has a Sri Swamiji quote assigned (src/lib/swamijiQuotes.ts), it's
- * broadcast first and this waits out its display duration before starting
- * the question — so the lead-time/answer countdown never ticks during it.
+ * post-start state). If the next question has a Sri Swamiji quote assigned
+ * (src/lib/swamijiQuotes.ts), this only broadcasts quote_display and
+ * advances currentQuestionIndex to it — the question itself doesn't start
+ * (no countdown, not visible) until the host explicitly reveals it via
+ * revealQuestionAfterQuote below, so there's no auto-advance timer for the
+ * host to race against. Returns null in that case; otherwise the question
+ * starts immediately and this returns its question_start payload.
  */
-export async function advanceToNextQuestion(pin: string) {
+export async function advanceToNextQuestion(pin: string): Promise<QuestionStartPayload | null> {
   const session = await db.gameSession.findFirst({
     where: { pin, status: "ACTIVE" },
     include: { questions: { orderBy: { order: "asc" } } },
   });
   if (!session) throw new QuestionFlowError(`No active session for PIN ${pin}.`);
 
+  // A quote is already showing for the current question and the host hasn't
+  // revealed it yet — treat "Next" as "reveal it" instead of skipping past
+  // it, which currentQuestionIndex + 1 below would otherwise do.
+  const current = session.currentQuestionIndex >= 0 ? session.questions[session.currentQuestionIndex] : null;
+  if (current && !current.startedAt) {
+    return startQuestion(pin, session.leadTimeSecs, current);
+  }
+
   const nextIndex = session.currentQuestionIndex + 1;
   const nextQuestion = session.questions[nextIndex];
   if (!nextQuestion) throw new QuestionFlowError("No more questions in this session.");
 
+  await db.gameSession.update({
+    where: { id: session.id },
+    data: { currentQuestionIndex: nextIndex },
+  });
+
   if (nextQuestion.quoteText && nextQuestion.quoteAttribution) {
-    const displayMs = quoteDisplayDurationMs(nextQuestion.quoteText);
     await publishToSession(pin, SessionEvent.QuoteDisplay, {
       quote: nextQuestion.quoteText,
       attribution: nextQuestion.quoteAttribution,
-      displayMs,
     });
-    await waitForQuoteOrSkip(pin, displayMs);
+    return null;
   }
 
-  const startedAt = new Date();
-  const optionsRevealedAt = new Date(startedAt.getTime() + session.leadTimeSecs * 1000);
-  await db.$transaction([
-    db.gameSession.update({
-      where: { id: session.id },
-      data: { currentQuestionIndex: nextIndex },
-    }),
-    db.gameSessionQuestion.update({
-      where: { id: nextQuestion.id },
-      data: { startedAt, optionsRevealedAt },
-    }),
-  ]);
+  return startQuestion(pin, session.leadTimeSecs, nextQuestion);
+}
 
-  const payload = toPublicQuestion({ ...nextQuestion, startedAt, optionsRevealedAt });
-  await publishToSession(pin, SessionEvent.QuestionStart, payload);
-  return payload;
+/** Reveals the question waiting behind the current quote (host's "Next"
+ * button on the quote overlay — see advanceToNextQuestion). Idempotent: a
+ * question that's already started (e.g. a duplicate click) is just returned
+ * as-is rather than re-started. */
+export async function revealQuestionAfterQuote(pin: string): Promise<QuestionStartPayload> {
+  const session = await db.gameSession.findFirst({
+    where: { pin, status: "ACTIVE" },
+    include: { questions: { orderBy: { order: "asc" } } },
+  });
+  const current = session?.questions[session.currentQuestionIndex];
+  if (!session || !current) throw new QuestionFlowError(`No live question for PIN ${pin}.`);
+  if (current.startedAt) return toPublicQuestion(current);
+  return startQuestion(pin, session.leadTimeSecs, current);
 }
 
 /**

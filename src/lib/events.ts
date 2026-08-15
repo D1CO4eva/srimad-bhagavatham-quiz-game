@@ -33,9 +33,10 @@ export type QuestionStartPayload = {
 };
 
 /** Sent right before question_start when the upcoming question has a quote
- * assigned (see src/lib/swamijiQuotes.ts) — `displayMs` tells clients how
- * long to hold it up before question_start replaces it. */
-export type QuoteDisplayPayload = { quote: string; attribution: string; displayMs: number };
+ * assigned (see src/lib/swamijiQuotes.ts). Stays on screen until the host
+ * clicks "Next" on it (POST /api/sessions/[pin]/reveal-question) — there's
+ * no auto-advance timer, so this carries no display duration. */
+export type QuoteDisplayPayload = { quote: string; attribution: string };
 
 export type AnswerCountUpdatePayload = { answeredCount: number; playerCount: number };
 /** `correctChoices` are the correct choice text(s) — safe to reveal now that answering is closed. */

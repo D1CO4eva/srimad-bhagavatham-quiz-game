@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  assignQuotePositions,
-  buildQuoteAssignment,
-  pickQuoteCount,
-  pickRandomQuotes,
-  quoteDisplayDurationMs,
-} from "@/lib/swamijiQuotes";
+import { assignQuotePositions, buildQuoteAssignment, pickQuoteCount, pickRandomQuotes } from "@/lib/swamijiQuotes";
 
 describe("pickQuoteCount", () => {
   it("returns the product's stated minimum at the shortest supported game length", () => {
@@ -77,27 +71,6 @@ describe("pickRandomQuotes", () => {
     const [quote] = pickRandomQuotes(1);
     expect(quote.quote.length).toBeGreaterThan(0);
     expect(quote.attribution.length).toBeGreaterThan(0);
-  });
-});
-
-describe("quoteDisplayDurationMs", () => {
-  it("floors at 3 seconds for an empty quote", () => {
-    expect(quoteDisplayDurationMs("")).toBe(3_000);
-  });
-
-  it("stays close to the floor for a very short quote", () => {
-    expect(quoteDisplayDurationMs("Hi")).toBeGreaterThanOrEqual(3_000);
-    expect(quoteDisplayDurationMs("Hi")).toBeLessThan(3_200);
-  });
-
-  it("caps at 6 seconds for a very long quote", () => {
-    expect(quoteDisplayDurationMs("x".repeat(500))).toBe(6_000);
-  });
-
-  it("scales up for a medium-length quote", () => {
-    const short = quoteDisplayDurationMs("x".repeat(10));
-    const long = quoteDisplayDurationMs("x".repeat(100));
-    expect(long).toBeGreaterThan(short);
   });
 });
 
