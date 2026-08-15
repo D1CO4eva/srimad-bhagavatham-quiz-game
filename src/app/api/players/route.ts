@@ -1,4 +1,4 @@
-import { joinSession, SessionNotJoinableError } from "@/lib/players";
+import { joinSession, SessionNotJoinableError, SessionFullError, MAX_PLAYERS_PER_SESSION } from "@/lib/players";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
@@ -21,6 +21,12 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof SessionNotJoinableError) {
       return Response.json({ error: "No active game with that PIN." }, { status: 404 });
+    }
+    if (error instanceof SessionFullError) {
+      return Response.json(
+        { error: `This game is full (max ${MAX_PLAYERS_PER_SESSION} players).` },
+        { status: 409 }
+      );
     }
     throw error;
   }
