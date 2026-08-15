@@ -25,6 +25,22 @@ const MEDALS = ["🥇", "🥈", "🥉"];
 
 type MyRank = { rank: number; points: number; totalPlayers: number; correctCount: number; answeredCount: number };
 
+/** "1st"/"2nd"/"3rd"/"4th" suffix for a percentile display. */
+function ordinalSuffix(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return "th";
+  switch (n % 10) {
+    case 1:
+      return "st";
+    case 2:
+      return "nd";
+    case 3:
+      return "rd";
+    default:
+      return "th";
+  }
+}
+
 export function PlayerLobby({
   pin,
   playerId,
@@ -226,9 +242,15 @@ export function PlayerLobby({
     const rank = mine?.rank ?? myRank?.rank;
     const points = mine?.points ?? myRank?.points;
     const total = myRank?.totalPlayers || totalPlayers;
-    // "Top X%" — 1-indexed rank over the field, so the winner always reads
-    // as top 1% rather than top 0%.
-    const topPercent = rank !== undefined && total > 0 ? Math.max(1, Math.round((rank / total) * 100)) : null;
+    // Standard percentile-rank convention — higher is better, 100th
+    // percentile is the top score — rather than a "Top X%" framing, where a
+    // lone/best player would confusingly read as "Top 100%".
+    const percentile =
+      rank !== undefined && total > 0
+        ? total === 1
+          ? 100
+          : Math.round(((total - rank) / (total - 1)) * 100)
+        : null;
     const scorePct =
       myRank && myRank.answeredCount > 0 ? Math.round((myRank.correctCount / myRank.answeredCount) * 100) : null;
 
@@ -255,7 +277,8 @@ export function PlayerLobby({
               // ranking anyway) stay private; show a percentile instead
               // (Story: percentile when leaderboard is off).
               <p className="font-serif text-2xl text-brand-ink">
-                Top {topPercent}% of {total} player{total === 1 ? "" : "s"}
+                {percentile}
+                {ordinalSuffix(percentile!)} percentile of {total} player{total === 1 ? "" : "s"}
               </p>
             )}
             {showLeaderboard && <p className="font-serif text-3xl font-bold text-brand">{points} pts</p>}
