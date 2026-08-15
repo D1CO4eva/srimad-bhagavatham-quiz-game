@@ -176,14 +176,10 @@ export function HostLobby({
     };
   }, [pin]);
 
-  // Safety-net auto-clear matching the server's own wait (questions.ts sleeps
-  // for the same displayMs before broadcasting question_start) — covers the
-  // case where that broadcast is ever delayed or dropped.
-  useEffect(() => {
-    if (!activeQuote) return;
-    const timer = setTimeout(() => setActiveQuote(null), activeQuote.displayMs);
-    return () => clearTimeout(timer);
-  }, [activeQuote]);
+  // No auto-clear timer here — the quote stays up until the host clicks
+  // "Next" (see handleNextQuote), which reveals the question and the
+  // resulting question_start broadcast is what actually clears activeQuote
+  // (see onQuestionStart above).
 
   // Auto-lock once the host's own countdown hits zero, so the UI moves on
   // even if no one clicks "Lock Now". The server deadline is authoritative
@@ -229,12 +225,12 @@ export function HostLobby({
     await fetch(`/api/sessions/${pin}/lock`, { method: "POST" }).catch(() => {});
   }
 
-  function handleSkipQuote() {
-    // Clears immediately client-side for responsiveness; the server's own
-    // question_start broadcast (once its wait ends) is what actually
-    // replaces this for every client, including the host.
-    setActiveQuote(null);
-    fetch(`/api/sessions/${pin}/skip-quote`, { method: "POST" }).catch(() => {});
+  async function handleNextQuote() {
+    // Doesn't clear activeQuote optimistically — the resulting
+    // question_start broadcast (see onQuestionStart above) is what actually
+    // clears it, for every client including the host, so a failed request
+    // here doesn't leave the quote overlay covering a question that never started.
+    await fetch(`/api/sessions/${pin}/reveal-question`, { method: "POST" }).catch(() => {});
   }
 
   async function handleToggleSetting(setting: "showLeaderboard" | "showTimer") {
@@ -292,7 +288,7 @@ export function HostLobby({
       <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-8 px-6 text-center lg:max-w-2xl xl:max-w-3xl">
         <Confetti />
         {activeQuote && (
-          <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} onSkip={handleSkipQuote} />
+          <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} onNext={handleNextQuote} />
         )}
         <span className="pill-badge">{quizTitle}</span>
         <h1 className="text-5xl">Final Results</h1>
@@ -320,7 +316,7 @@ export function HostLobby({
     return (
       <div className="mx-auto flex min-h-screen max-w-3xl flex-col items-center gap-6 px-6 py-16 text-center lg:max-w-5xl xl:max-w-6xl">
         {activeQuote && (
-          <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} onSkip={handleSkipQuote} />
+          <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} onNext={handleNextQuote} />
         )}
         <div className="flex w-full items-center justify-between gap-3">
           <span className="pill-badge">

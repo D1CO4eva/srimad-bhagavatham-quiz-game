@@ -58,15 +58,6 @@ export function pickRandomQuotes(count: number): SwamijiQuote[] {
   return picked;
 }
 
-const MIN_DISPLAY_MS = 3_000;
-const MAX_DISPLAY_MS = 6_000;
-const MS_PER_CHAR = 15;
-
-/** Longer quotes stay on screen longer, capped to the product's 3-6s window. */
-export function quoteDisplayDurationMs(quote: string): number {
-  return Math.min(MAX_DISPLAY_MS, Math.max(MIN_DISPLAY_MS, MIN_DISPLAY_MS + quote.length * MS_PER_CHAR));
-}
-
 /**
  * Builds a full `questionOrder -> quote` assignment for a game session of
  * `questionCount` questions, computed once at session creation (Story: quote

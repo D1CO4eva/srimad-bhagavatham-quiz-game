@@ -145,14 +145,9 @@ export function PlayerLobby({
     };
   }, [pin, playerId]);
 
-  // Safety-net auto-clear matching the server's own wait (questions.ts sleeps
-  // for the same displayMs before broadcasting question_start) — covers the
-  // case where that broadcast is ever delayed or dropped.
-  useEffect(() => {
-    if (!activeQuote) return;
-    const timer = setTimeout(() => setActiveQuote(null), activeQuote.displayMs);
-    return () => clearTimeout(timer);
-  }, [activeQuote]);
+  // No auto-clear timer here — the quote stays up until the host reveals
+  // the question, and the resulting question_start broadcast is what
+  // actually clears activeQuote (see onQuestionStart above).
 
   // Story 5.2: fetch our own rank once a question locks — a plain
   // authenticated GET is as private as this needs to be (see the rank
