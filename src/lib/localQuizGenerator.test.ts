@@ -209,7 +209,10 @@ describe("generateQuiz", () => {
     const { generateQuiz } = await import("@/lib/localQuizGenerator");
     const quiz = await generateQuiz({
       topics: ["Sanatana Dharma"],
-      sourceText: "Some course-note excerpt.",
+      // Contains every MULTIPLE_CHOICE_FACTS answer verbatim so these
+      // faithfulness-focused tests don't also trip the (unrelated)
+      // verbatim-correct-answer check on whichever slot type gets drawn.
+      sourceText: "Some course-note excerpt about Sukadeva Goswami, Vyasa, Sukadeva, Pariksit, and Shringi.",
       questionCount: 1,
       difficulty: "mixed",
       coverageLabel: "Week 1",
@@ -227,7 +230,10 @@ describe("generateQuiz", () => {
     await expect(
       generateQuiz({
         topics: ["Sanatana Dharma"],
-        sourceText: "Some course-note excerpt.",
+        // Contains every MULTIPLE_CHOICE_FACTS answer verbatim so these
+      // faithfulness-focused tests don't also trip the (unrelated)
+      // verbatim-correct-answer check on whichever slot type gets drawn.
+      sourceText: "Some course-note excerpt about Sukadeva Goswami, Vyasa, Sukadeva, Pariksit, and Shringi.",
         questionCount: 1,
         difficulty: "mixed",
         coverageLabel: "Week 1",
@@ -323,12 +329,12 @@ describe("generateQuiz", () => {
             type: "multiple_choice",
             question: "What prompted Sage Narada to encourage Sage Vyasa to compose a scripture describing the glories and leelas of Bhagavan?",
             choices: [
-              "To fulfill the demand for historical accounts of ancient kings.",
-              "To help Vyasa achieve personal recognition and fame as a scholar.",
-              "To inspire devotion in the hearts of listeners by sharing his own transformative experiences.",
-              "To create a text focused solely on philosophical principles without narrative elements.",
+              "Historical accounts of ancient kings",
+              "Vyasa's personal recognition and fame",
+              "Inspire devotion in listeners' hearts",
+              "Philosophical principles without narrative",
             ],
-            answer: "To inspire devotion in the hearts of listeners by sharing his own transformative experiences.",
+            answer: "Inspire devotion in listeners' hearts",
             explanation: "The passage says Narada shared his own past-life story to move Vyasa toward composing a devotional work.",
             core_fact: "Narada's reason for urging Vyasa to compose a scripture about Bhagavan",
           })
@@ -336,12 +342,12 @@ describe("generateQuiz", () => {
             type: "multiple_choice",
             question: "What did Sage Narada suggest as the primary purpose of composing a scripture during his conversation with Sage Vyasa?",
             choices: [
-              "To describe the detailed genealogies of ancient kings.",
-              "To instill devotion to Bhagavan in the hearts of listeners.",
-              "To provide a comprehensive guide for performing rituals.",
-              "To document the historical events of his life.",
+              "Detailed genealogies of ancient kings",
+              "Instill devotion to Bhagavan",
+              "A guide for performing rituals",
+              "Document the historical events",
             ],
-            answer: "To instill devotion to Bhagavan in the hearts of listeners.",
+            answer: "Instill devotion to Bhagavan",
             explanation: "According to the text, Narada's aim was for the scripture to awaken love for the Lord in its readers.",
             core_fact: "Narada's stated reason for encouraging Vyasa to compose a scripture",
           });
@@ -440,6 +446,7 @@ describe("generateQuiz", () => {
             answer: "True",
             explanation: "",
             coreFact: "",
+            timeLimitSecs: 20,
           },
         ],
       })

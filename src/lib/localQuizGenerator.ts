@@ -62,6 +62,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { completeChat, type ChatMessage } from "@/lib/openrouter";
 import { scoreFaithfulness } from "@/lib/faithfulness";
+import { MIN_TIME_LIMIT_SECS, MAX_TIME_LIMIT_SECS, DEFAULT_TIME_LIMIT_SECS } from "@/lib/timeLimits";
 
 const DEFAULT_PRIMARY_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_FALLBACK_MODEL = "google/gemini-2.5-flash";
@@ -110,6 +111,11 @@ export type GeneratedQuestion = {
    * catches that, where word-overlap on the question/explanation text alone
    * doesn't reliably. */
   coreFact: string;
+  /** Per-question countdown, derived from a word-count-based complexity score
+   * (see computeTimeLimitSecs) rather than one flat default for every
+   * question — a longer stem plus four choices needs more reading time than
+   * a short true/false statement. */
+  timeLimitSecs: number;
 };
 
 export type GeneratedQuiz = {
@@ -134,7 +140,7 @@ export class QuizGenerationError extends Error {
 type Difficulty = "beginner" | "intermediate" | "advanced" | "mixed";
 type EffectiveDifficulty = "beginner" | "intermediate" | "advanced";
 type QuestionType = "multiple_choice" | "true_false";
-type FailureReason = "invalid_json" | "low_faithfulness" | "duplicate" | "ambiguous";
+type FailureReason = "invalid_json" | "low_faithfulness" | "duplicate" | "ambiguous" | "not_verbatim" | "choice_too_long";
 
 const DIFFICULTY_GUIDANCE: Record<EffectiveDifficulty, string> = {
   beginner: "a straightforward recall question testing a clearly stated fact from the topic",
@@ -361,6 +367,7 @@ function buildUserPrompt(params: {
   if (params.type === "multiple_choice") {
     lines.push(
       'Exactly 4 choices, only one correct, choices in a random order, and "answer" must match one of the choices character-for-character.',
+      "Every choice must be short — 1 to 5 words, not a full sentence.",
       "The three wrong choices must be clearly and definitively wrong — not just different, less complete, " +
         "or other real facts from the same list. Avoid bare ordinal/sequence questions over a named list " +
         "(\"who is first/second in this lineage\", \"which came right after X\") when the other choices are " +
@@ -369,6 +376,13 @@ function buildUserPrompt(params: {
         "Prefer testing a relationship, distinguishing trait, or cause instead (e.g. who something originates " +
         "from, who directly did X, what makes one option different in kind from the others)."
     );
+    if (params.sourceText.trim()) {
+      lines.push(
+        "The correct answer must be copied verbatim, word-for-word, from the course-note excerpt above — do " +
+          "not paraphrase, reword, or shorten it. The three wrong choices should NOT be lifted from the " +
+          "excerpt; write those freely so they're clearly wrong but plausible."
+      );
+    }
   }
 
   return lines.join("\n");
@@ -414,6 +428,9 @@ function parseDraft(raw: string, type: QuestionType): GeneratedQuestion | null {
       answer: result.data.answer,
       explanation: result.data.explanation,
       coreFact: result.data.core_fact,
+      // Placeholder — generateSlot overwrites this with the real
+      // complexity-derived value once effectiveDifficulty is known.
+      timeLimitSecs: DEFAULT_TIME_LIMIT_SECS,
     };
   }
 
@@ -427,7 +444,34 @@ function parseDraft(raw: string, type: QuestionType): GeneratedQuestion | null {
     answer: result.data.answer,
     explanation: result.data.explanation,
     coreFact: result.data.core_fact,
+    timeLimitSecs: DEFAULT_TIME_LIMIT_SECS,
   };
+}
+
+// Word count is a simple, deterministic proxy for how long a question takes
+// to read and answer — no extra model call, and nothing to validate the way
+// a self-reported complexity score would need. Reading a four-choice MC
+// question takes longer than a single true/false statement of the same
+// length, and harder difficulty tiers get a little slack on top of that.
+const SECS_PER_WORD = 1.1;
+const DIFFICULTY_TIME_MULTIPLIER: Record<EffectiveDifficulty, number> = {
+  beginner: 0.85,
+  intermediate: 1,
+  advanced: 1.15,
+};
+
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** Complexity-derived per-question countdown, clamped to the product's global time-limit bounds. */
+function computeTimeLimitSecs(question: GeneratedQuestion, effectiveDifficulty: EffectiveDifficulty): number {
+  const readableWords =
+    wordCount(question.question) +
+    (question.type === "multiple_choice" ? wordCount(question.choices.join(" ")) : 0);
+  const raw = MIN_TIME_LIMIT_SECS + readableWords * SECS_PER_WORD * DIFFICULTY_TIME_MULTIPLIER[effectiveDifficulty];
+  const rounded = Math.round(raw / 5) * 5;
+  return Math.min(MAX_TIME_LIMIT_SECS, Math.max(MIN_TIME_LIMIT_SECS, rounded));
 }
 
 async function tryComplete(model: string, messages: ChatMessage[]): Promise<string | null> {
@@ -442,6 +486,22 @@ type AttemptResult =
   | { ok: true; question: GeneratedQuestion }
   | { ok: false; reason: FailureReason; raw: string | null; duplicateOf?: string };
 
+// Loose bound (not the strict 1-5) — a model occasionally sends "at least
+// one, at most" as a whole clause; this only rejects choices that are
+// clearly full sentences rather than short answer text.
+const MAX_CHOICE_WORDS = 6;
+
+function findOverLongChoice(choices: string[]): string | null {
+  return choices.find((choice) => wordCount(choice) > MAX_CHOICE_WORDS) ?? null;
+}
+
+/** Loose containment check — normalizes whitespace/case only, so minor
+ * punctuation differences don't false-positive a verbatim quote as a paraphrase. */
+function isVerbatimInSource(answer: string, sourceText: string): boolean {
+  const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+  return normalize(sourceText).includes(normalize(answer));
+}
+
 async function attemptDraft(params: {
   model: string;
   judgeModel: string;
@@ -455,6 +515,15 @@ async function attemptDraft(params: {
 
   const parsed = parseDraft(raw, params.type);
   if (!parsed) return { ok: false, reason: "invalid_json", raw };
+
+  if (parsed.type === "multiple_choice") {
+    const overLong = findOverLongChoice(parsed.choices);
+    if (overLong) return { ok: false, reason: "choice_too_long", raw };
+
+    if (params.sourceText.trim() && !isVerbatimInSource(parsed.answer, params.sourceText)) {
+      return { ok: false, reason: "not_verbatim", raw };
+    }
+  }
 
   const duplicate = findDuplicate(parsed, params.avoidEntries);
   if (duplicate) {
@@ -505,6 +574,22 @@ function repairPrompt(reason: FailureReason, raw: string, duplicateOf?: string):
       "the same list. Respond again with ONLY the corrected JSON object."
     );
   }
+  if (reason === "choice_too_long") {
+    return (
+      `Here is what you sent:\n${raw}\n\n` +
+      "One or more of the choices is too long — every choice must be 1 to 5 words, not a full sentence. " +
+      "Shorten each choice to a short phrase or name while keeping the same meaning. Respond again with ONLY " +
+      "the corrected JSON object."
+    );
+  }
+  if (reason === "not_verbatim") {
+    return (
+      `Here is what you sent:\n${raw}\n\n` +
+      "The correct answer's wording doesn't appear verbatim in the course-note excerpt — it looks paraphrased " +
+      "or reworded. Copy the correct answer's exact wording straight from the excerpt instead (the three wrong " +
+      "choices don't need to be verbatim). Respond again with ONLY the corrected JSON object."
+    );
+  }
   return (
     `Here is what you sent:\n${raw}\n\n` +
     "That question, answer, or explanation wasn't clearly supported by the course-note excerpt above — " +
@@ -549,7 +634,7 @@ async function generateSlot(params: {
     sourceText: params.sourceText,
     avoidEntries: params.avoidEntries,
   });
-  if (first.ok) return first.question;
+  if (first.ok) return withTimeLimit(first.question, effectiveDifficulty);
 
   if (first.raw) {
     const repairMessages: ChatMessage[] = [
@@ -564,7 +649,7 @@ async function generateSlot(params: {
       sourceText: params.sourceText,
       avoidEntries: params.avoidEntries,
     });
-    if (second.ok) return second.question;
+    if (second.ok) return withTimeLimit(second.question, effectiveDifficulty);
   }
 
   const third = await attemptDraft({
@@ -575,7 +660,11 @@ async function generateSlot(params: {
     sourceText: params.sourceText,
     avoidEntries: params.avoidEntries,
   });
-  return third.ok ? third.question : null;
+  return third.ok ? withTimeLimit(third.question, effectiveDifficulty) : null;
+}
+
+function withTimeLimit(question: GeneratedQuestion, effectiveDifficulty: EffectiveDifficulty): GeneratedQuestion {
+  return { ...question, timeLimitSecs: computeTimeLimitSecs(question, effectiveDifficulty) };
 }
 
 export async function generateQuiz(params: {
