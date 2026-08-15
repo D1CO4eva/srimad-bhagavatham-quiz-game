@@ -291,8 +291,14 @@ export function HostLobby({
           <QuoteOverlay quote={activeQuote.quote} attribution={activeQuote.attribution} onNext={handleNextQuote} />
         )}
         <span className="pill-badge">{quizTitle}</span>
-        <h1 className="text-5xl">Final Results</h1>
-        <p className="pill-badge">Game has ended</p>
+        {showLeaderboard ? (
+          <>
+            <h1 className="text-5xl">Final Results</h1>
+            <p className="pill-badge">Game has ended</p>
+          </>
+        ) : (
+          <h1 className="text-4xl">Radhe Radhe! Game has ended!</h1>
+        )}
         {showLeaderboard ? (
           <ol className="flex w-full flex-col gap-3">
             {podium.map((entry) => (
