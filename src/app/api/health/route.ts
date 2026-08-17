@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
 import { redis } from "@/lib/redis";
 
 /**
@@ -6,7 +6,7 @@ import { redis } from "@/lib/redis";
  * a platform's own health check, etc.) at this so a mid-game outage is
  * noticed within seconds instead of from a confused host mid-class.
  *
- * Checks Postgres and Redis live, since either going down is the actual
+ * Checks Firestore and Redis live, since either going down is the actual
  * "game just broke" scenario. Ably isn't checked live here — a config
  * check is enough, and it avoids putting an external API call on the
  * critical path of every uptime ping.
@@ -16,7 +16,9 @@ export async function GET() {
   let healthy = true;
 
   try {
-    await db.$queryRaw`SELECT 1`;
+    // Lightweight connectivity check — doesn't depend on any specific
+    // document or collection existing, just that Firestore answers at all.
+    await firestore.listCollections();
     checks.database = "ok";
   } catch (error) {
     healthy = false;

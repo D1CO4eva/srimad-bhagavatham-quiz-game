@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { createQuiz } from "@/lib/quizzes";
 import { generateQuiz, QuizGenerationError, type GenerationProgress } from "@/lib/localQuizGenerator";
 import { resolveGenerateQuizRequest } from "@/lib/generateQuizRequest";
 
@@ -36,41 +36,19 @@ export async function POST(request: Request) {
           onProgress: (progress: GenerationProgress) => send("progress", progress),
         });
 
-        const quiz = await db.quiz.create({
-          data: {
-            title: generated.title,
-            description: generated.description,
-            status: "DRAFT",
-            mode,
-            questions: {
-              create: generated.questions.map((question, index) => ({
-                order: index,
-                type: question.type === "true_false" ? "TRUE_FALSE" : "MULTIPLE_CHOICE",
-                question: question.question,
-                choices: question.choices,
-                correctChoices: [question.answer],
-                explanation: question.explanation,
-                timeLimitSecs: question.timeLimitSecs,
-              })),
-            },
-          },
-          select: {
-            id: true,
-            title: true,
-            status: true,
-            questions: {
-              orderBy: { order: "asc" },
-              select: {
-                id: true,
-                order: true,
-                type: true,
-                question: true,
-                choices: true,
-                correctChoices: true,
-                explanation: true,
-              },
-            },
-          },
+        const quiz = await createQuiz({
+          title: generated.title,
+          description: generated.description,
+          mode,
+          questions: generated.questions.map((question, index) => ({
+            order: index,
+            type: question.type === "true_false" ? ("TRUE_FALSE" as const) : ("MULTIPLE_CHOICE" as const),
+            question: question.question,
+            choices: question.choices,
+            correctChoices: [question.answer],
+            explanation: question.explanation,
+            timeLimitSecs: question.timeLimitSecs,
+          })),
         });
 
         send("complete", quiz);

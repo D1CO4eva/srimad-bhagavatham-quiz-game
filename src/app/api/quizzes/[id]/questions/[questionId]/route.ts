@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
 import { MIN_TIME_LIMIT_SECS, MAX_TIME_LIMIT_SECS } from "@/lib/timeLimits";
 
 export async function PATCH(
@@ -8,18 +8,16 @@ export async function PATCH(
   const { id, questionId } = await params;
   const body = await request.json().catch(() => null);
 
-  const question = await db.question.findUnique({
-    where: { id: questionId },
-    select: { id: true, quizId: true, type: true, choices: true },
-  });
-  if (!question || question.quizId !== id) {
+  const quizRef = firestore.collection("quizzes").doc(id);
+  const questionRef = quizRef.collection("questions").doc(questionId);
+  const [quizSnap, questionSnap] = await Promise.all([quizRef.get(), questionRef.get()]);
+  if (!questionSnap.exists) {
     return Response.json({ error: "Question not found." }, { status: 404 });
   }
-
-  const quiz = await db.quiz.findUnique({ where: { id }, select: { status: true } });
-  if (!quiz) {
+  if (!quizSnap.exists) {
     return Response.json({ error: "Quiz not found." }, { status: 404 });
   }
+  const question = questionSnap.data()!;
 
   const data: { question?: string; choices?: string[]; correctChoices?: string[]; timeLimitSecs?: number } = {};
 
@@ -95,13 +93,18 @@ export async function PATCH(
     return Response.json({ error: "Nothing to update." }, { status: 400 });
   }
 
-  const updated = await db.question.update({
-    where: { id: questionId },
-    data,
-    select: { id: true, type: true, question: true, choices: true, correctChoices: true, timeLimitSecs: true },
-  });
+  await questionRef.update(data);
+  const updatedSnap = await questionRef.get();
+  const updated = updatedSnap.data()!;
 
-  return Response.json(updated);
+  return Response.json({
+    id: questionId,
+    type: updated.type,
+    question: updated.question,
+    choices: updated.choices,
+    correctChoices: updated.correctChoices,
+    timeLimitSecs: updated.timeLimitSecs,
+  });
 }
 
 export async function DELETE(
@@ -110,37 +113,44 @@ export async function DELETE(
 ) {
   const { id, questionId } = await params;
 
-  const question = await db.question.findUnique({
-    where: { id: questionId },
-    select: { id: true, quizId: true },
-  });
-  if (!question || question.quizId !== id) {
+  const quizRef = firestore.collection("quizzes").doc(id);
+  const questionsRef = quizRef.collection("questions");
+  const questionRef = questionsRef.doc(questionId);
+
+  const [quizSnap, questionSnap, countSnap] = await Promise.all([
+    quizRef.get(),
+    questionRef.get(),
+    questionsRef.count().get(),
+  ]);
+  if (!questionSnap.exists) {
     return Response.json({ error: "Question not found." }, { status: 404 });
   }
-
-  const quiz = await db.quiz.findUnique({
-    where: { id },
-    select: { _count: { select: { questions: true } } },
-  });
-  if (!quiz) {
+  if (!quizSnap.exists) {
     return Response.json({ error: "Quiz not found." }, { status: 404 });
   }
-  if (quiz._count.questions <= 1) {
+  if (countSnap.data().count <= 1) {
     return Response.json({ error: "A quiz must have at least one question." }, { status: 400 });
   }
 
   // Question order must stay contiguous (0..n-1) — game sessions identify the
-  // last question by `order === questions.length - 1`, which a gap would break.
-  await db.$transaction(async (tx) => {
-    await tx.question.delete({ where: { id: questionId } });
-    const remaining = await tx.question.findMany({
-      where: { quizId: id },
-      orderBy: { order: "asc" },
-      select: { id: true, order: true },
-    });
-    for (const [index, remainingQuestion] of remaining.entries()) {
-      if (remainingQuestion.order !== index) {
-        await tx.question.update({ where: { id: remainingQuestion.id }, data: { order: index } });
+  // last question by `order === questions.length - 1`, which a gap would
+  // break. Firestore transactions require every read before any write (the
+  // original Prisma version interleaved delete-then-read-then-write, which
+  // isn't expressible here) — validated against concurrent overlapping
+  // deletes in the migration plan's Phase 2 spike
+  // (scripts/firestore-spike/02-reorder-transaction.ts).
+  await firestore.runTransaction(async (tx) => {
+    const snap = await tx.get(questionsRef.orderBy("order"));
+    const target = snap.docs.find((d) => d.id === questionId);
+    if (!target) return; // already deleted by a concurrent request
+    const deletedOrder = target.data().order as number;
+
+    tx.delete(target.ref);
+    for (const doc of snap.docs) {
+      if (doc.id === questionId) continue;
+      const order = doc.data().order as number;
+      if (order > deletedOrder) {
+        tx.update(doc.ref, { order: order - 1 });
       }
     }
   });

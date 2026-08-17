@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
 import { generateUniqueSlug } from "@/lib/slug";
 
 function parseNullableDate(value: unknown): { ok: true; value: Date | null } | { ok: false } {
@@ -77,18 +77,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return Response.json({ error: "Nothing to update." }, { status: 400 });
   }
 
-  const existing = await db.quiz.findUnique({
-    where: { id },
-    select: { id: true, title: true, mode: true, slug: true, opensAt: true, closesAt: true },
-  });
-  if (!existing) {
+  const quizRef = firestore.collection("quizzes").doc(id);
+  const existingSnap = await quizRef.get();
+  if (!existingSnap.exists) {
     return Response.json({ error: "Quiz not found." }, { status: 404 });
   }
+  const existing = existingSnap.data()!;
+  const existingOpensAt: Date | null = existing.opensAt?.toDate?.() ?? null;
+  const existingClosesAt: Date | null = existing.closesAt?.toDate?.() ?? null;
 
   // "closesAt after opensAt" must hold for the resulting row, whether either
   // side is changing in this request or was already set from a previous one.
-  const effectiveOpensAt = "opensAt" in data ? data.opensAt : existing.opensAt;
-  const effectiveClosesAt = "closesAt" in data ? data.closesAt : existing.closesAt;
+  const effectiveOpensAt = "opensAt" in data ? data.opensAt : existingOpensAt;
+  const effectiveClosesAt = "closesAt" in data ? data.closesAt : existingClosesAt;
   if (effectiveOpensAt && effectiveClosesAt && effectiveClosesAt <= effectiveOpensAt) {
     return Response.json({ error: "closesAt must be after opensAt." }, { status: 400 });
   }
@@ -102,48 +103,47 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
   }
 
-  const quiz = await db.quiz.update({
-    where: { id },
-    data,
-    select: {
-      id: true,
-      title: true,
-      status: true,
-      mode: true,
-      slug: true,
-      responsesOpen: true,
-      opensAt: true,
-      closesAt: true,
-    },
-  });
+  await quizRef.update(data);
+  const updatedSnap = await quizRef.get();
+  const updated = updatedSnap.data()!;
 
-  return Response.json(quiz);
+  return Response.json({
+    id: quizRef.id,
+    title: updated.title,
+    status: updated.status,
+    mode: updated.mode,
+    slug: updated.slug ?? null,
+    responsesOpen: updated.responsesOpen,
+    opensAt: updated.opensAt?.toDate?.() ?? null,
+    closesAt: updated.closesAt?.toDate?.() ?? null,
+  });
 }
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const existing = await db.quiz.findUnique({
-    where: { id },
-    select: { id: true, _count: { select: { gameSessions: true, responses: true } } },
-  });
-  if (!existing) {
+  const quizRef = firestore.collection("quizzes").doc(id);
+  const [quizSnap, gameSessionCountSnap, responseCountSnap] = await Promise.all([
+    quizRef.get(),
+    firestore.collection("gameSessions").where("quizId", "==", id).count().get(),
+    quizRef.collection("responses").count().get(),
+  ]);
+  if (!quizSnap.exists) {
     return Response.json({ error: "Quiz not found." }, { status: 404 });
   }
-  if (existing._count.gameSessions > 0) {
-    return Response.json(
-      { error: "This quiz has game sessions and can't be deleted." },
-      { status: 400 }
-    );
+  if (gameSessionCountSnap.data().count > 0) {
+    return Response.json({ error: "This quiz has game sessions and can't be deleted." }, { status: 400 });
   }
-  if (existing._count.responses > 0) {
-    return Response.json(
-      { error: "This quiz has responses and can't be deleted." },
-      { status: 400 }
-    );
+  if (responseCountSnap.data().count > 0) {
+    return Response.json({ error: "This quiz has responses and can't be deleted." }, { status: 400 });
   }
 
-  await db.quiz.delete({ where: { id } });
+  // Firestore has no cascade delete — recursiveDelete() removes the Quiz doc
+  // and every subcollection under it (questions, responses) in one call.
+  // This is the only place cascade delete is ever exercised in the app
+  // (confirmed via grep — GameSession/Player/Answer/SessionResult are never
+  // deleted anywhere), so no other cascade handling is needed elsewhere.
+  await firestore.recursiveDelete(quizRef);
 
   return Response.json({ ok: true });
 }

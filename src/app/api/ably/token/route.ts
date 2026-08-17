@@ -1,5 +1,5 @@
 import { getAblyRest, sessionChannelName } from "@/lib/ably";
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
 import { NextRequest } from "next/server";
 
 /**
@@ -19,12 +19,13 @@ export async function GET(request: NextRequest) {
   // stay mounted through the podium after the game ends and keep
   // re-authing on Ably's normal token-refresh cycle, so this must keep
   // succeeding rather than 404 the moment the last question locks.
-  const session = await db.gameSession.findFirst({
-    where: { pin },
-    orderBy: { createdAt: "desc" },
-    select: { id: true },
-  });
-  if (!session) {
+  const sessionSnap = await firestore
+    .collection("gameSessions")
+    .where("pin", "==", pin)
+    .orderBy("createdAt", "desc")
+    .limit(1)
+    .get();
+  if (sessionSnap.empty) {
     return Response.json({ error: "No session for that PIN." }, { status: 404 });
   }
 
