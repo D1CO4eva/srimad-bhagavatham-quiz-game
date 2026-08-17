@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
 
 const MAX_ATTEMPTS = 50;
 
@@ -16,8 +16,8 @@ export async function generateUniqueSlug(title: string): Promise<string> {
   const base = slugify(title);
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const candidate = attempt === 0 ? base : `${base}-${attempt + 1}`;
-    const existing = await db.quiz.findUnique({ where: { slug: candidate }, select: { id: true } });
-    if (!existing) return candidate;
+    const existing = await firestore.collection("quizzes").where("slug", "==", candidate).limit(1).get();
+    if (existing.empty) return candidate;
   }
   throw new Error("Could not generate a unique slug after multiple attempts.");
 }

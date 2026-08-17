@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
 
 const PIN_LENGTH = 6;
 const MAX_ATTEMPTS = 20;
@@ -15,11 +15,13 @@ export function randomPin(): string {
 export async function generateUniquePin(): Promise<string> {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const pin = randomPin();
-    const existing = await db.gameSession.findFirst({
-      where: { pin, status: { not: "COMPLETED" } },
-      select: { id: true },
-    });
-    if (!existing) return pin;
+    const existing = await firestore
+      .collection("gameSessions")
+      .where("pin", "==", pin)
+      .where("status", "in", ["LOBBY", "ACTIVE"])
+      .limit(1)
+      .get();
+    if (existing.empty) return pin;
   }
   throw new Error("Could not generate a unique PIN after multiple attempts.");
 }

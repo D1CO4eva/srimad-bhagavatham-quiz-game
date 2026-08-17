@@ -1,4 +1,5 @@
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
+import { FieldValue, type CollectionReference, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { publishToSession } from "@/lib/ably";
 import { SessionEvent } from "@/lib/events";
 
@@ -22,13 +23,21 @@ export class SessionFullError extends Error {
   }
 }
 
+/** Any session that hasn't ended yet is joinable — mirrors the pin.ts uniqueness query. */
+async function findJoinableSession(pin: string): Promise<QueryDocumentSnapshot | null> {
+  const snap = await firestore
+    .collection("gameSessions")
+    .where("pin", "==", pin)
+    .where("status", "in", ["LOBBY", "ACTIVE"])
+    .limit(1)
+    .get();
+  return snap.empty ? null : snap.docs[0];
+}
+
 /** Appends " (2)", " (3)", ... until the nickname is free within the session. */
-async function uniqueNickname(gameSessionId: string, requested: string): Promise<string> {
-  const existing = await db.player.findMany({
-    where: { gameSessionId },
-    select: { nickname: true },
-  });
-  const taken = new Set(existing.map((player) => player.nickname));
+async function uniqueNickname(playersRef: CollectionReference, requested: string): Promise<string> {
+  const existing = await playersRef.get();
+  const taken = new Set(existing.docs.map((doc) => doc.data().nickname as string));
   if (!taken.has(requested)) return requested;
 
   let suffix = 2;
@@ -45,27 +54,42 @@ async function uniqueNickname(gameSessionId: string, requested: string): Promise
  * (Story 2.1).
  */
 export async function joinSession(pin: string, requestedNickname: string) {
-  const session = await db.gameSession.findFirst({
-    where: { pin, status: { not: "COMPLETED" } },
-    select: { id: true, pin: true, status: true },
+  const sessionDoc = await findJoinableSession(pin);
+  if (!sessionDoc) throw new SessionNotJoinableError(pin);
+
+  const playersRef = sessionDoc.ref.collection("players");
+  const existingCountSnap = await playersRef.count().get();
+  if (existingCountSnap.data().count >= MAX_PLAYERS_PER_SESSION) throw new SessionFullError(pin);
+
+  const nickname = await uniqueNickname(playersRef, requestedNickname);
+  const playerRef = playersRef.doc();
+  await playerRef.set({
+    // Redundant with the doc ID, but needed as a real field so
+    // src/app/api/players/[playerId]/route.ts can resolve a player by ID
+    // alone via a collectionGroup("players") query, without the client
+    // having to also know/send which session it belongs to.
+    playerId: playerRef.id,
+    gameSessionId: sessionDoc.id,
+    nickname,
+    estimatedLatencyMs: null,
+    joinedAt: FieldValue.serverTimestamp(),
   });
-  if (!session) throw new SessionNotJoinableError(pin);
 
-  const existingCount = await db.player.count({ where: { gameSessionId: session.id } });
-  if (existingCount >= MAX_PLAYERS_PER_SESSION) throw new SessionFullError(pin);
+  const playerCountSnap = await playersRef.count().get();
+  const playerCount = playerCountSnap.data().count;
 
-  const nickname = await uniqueNickname(session.id, requestedNickname);
-  const player = await db.player.create({
-    data: { gameSessionId: session.id, nickname },
-  });
-
-  const playerCount = await db.player.count({ where: { gameSessionId: session.id } });
-
-  await publishToSession(session.pin, SessionEvent.PlayerJoined, {
-    playerId: player.id,
-    nickname: player.nickname,
+  const session = sessionDoc.data();
+  await publishToSession(session.pin as string, SessionEvent.PlayerJoined, {
+    playerId: playerRef.id,
+    nickname,
     playerCount,
   });
 
-  return { ...player, sessionStatus: session.status };
+  return {
+    id: playerRef.id,
+    gameSessionId: sessionDoc.id,
+    nickname,
+    estimatedLatencyMs: null,
+    sessionStatus: session.status as string,
+  };
 }

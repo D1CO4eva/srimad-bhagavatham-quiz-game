@@ -6,7 +6,7 @@
  */
 
 import { getCourseCatalog, resolveGenerationScope, getSourceText } from "@/lib/courseCatalog";
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
 import type { GeneratedQuestion } from "@/lib/localQuizGenerator";
 
 export const ALLOWED_DIFFICULTIES = new Set(["beginner", "intermediate", "advanced", "mixed"]);
@@ -83,28 +83,39 @@ export async function resolveGenerateQuizRequest(request: Request): Promise<Gene
   // produces (and what findDuplicate's answer/choice-overlap check expects)
   // — MULTI_SELECT/SHORT_ANSWER questions are excluded rather than
   // shoehorned into that shape.
-  const existingQuestionRows = await db.question.findMany({
-    where: { type: { in: ["MULTIPLE_CHOICE", "TRUE_FALSE"] } },
-    orderBy: { quiz: { createdAt: "desc" } },
-    take: MAX_EXISTING_QUESTIONS_FOR_DEDUP,
-    select: { id: true, type: true, question: true, choices: true, correctChoices: true, timeLimitSecs: true },
+  //
+  // "Most recent quizzes first" was a join on the parent Quiz's createdAt in
+  // Prisma — Firestore collection-group queries can't join, so each
+  // Question doc carries a denormalized quizCreatedAt field (set wherever
+  // Question docs are created — see src/app/api/quizzes/route.ts and
+  // .../generate/route.ts) specifically so this query can order by it
+  // directly.
+  const existingQuestionsSnap = await firestore
+    .collectionGroup("questions")
+    .where("type", "in", ["MULTIPLE_CHOICE", "TRUE_FALSE"])
+    .orderBy("quizCreatedAt", "desc")
+    .limit(MAX_EXISTING_QUESTIONS_FOR_DEDUP)
+    .get();
+  const existingQuestions: GeneratedQuestion[] = existingQuestionsSnap.docs.map((doc) => {
+    const row = doc.data();
+    return {
+      id: doc.id,
+      type: row.type === "TRUE_FALSE" ? "true_false" : "multiple_choice",
+      question: row.question,
+      choices: row.choices,
+      answer: row.correctChoices[0] ?? "",
+      explanation: "",
+      // Not persisted (see route.ts's save mapping) so prior quizzes'
+      // questions have none — findDuplicate's core_fact check is a no-op
+      // against these rows (empty word-set never meets the overlap
+      // threshold), same as the empty explanation above; the other checks
+      // still apply.
+      coreFact: "",
+      // Only used for findDuplicate's avoid-list — timing is never derived
+      // from these rows, so the actual stored value doesn't matter here.
+      timeLimitSecs: row.timeLimitSecs,
+    };
   });
-  const existingQuestions: GeneratedQuestion[] = existingQuestionRows.map((row) => ({
-    id: row.id,
-    type: row.type === "TRUE_FALSE" ? "true_false" : "multiple_choice",
-    question: row.question,
-    choices: row.choices,
-    answer: row.correctChoices[0] ?? "",
-    explanation: "",
-    // Not persisted (see route.ts's save mapping) so prior quizzes' questions
-    // have none — findDuplicate's core_fact check is a no-op against these
-    // rows (empty word-set never meets the overlap threshold), same as the
-    // empty explanation above; the other checks still apply.
-    coreFact: "",
-    // Only used for findDuplicate's avoid-list — timing is never derived
-    // from these rows, so the actual stored value doesn't matter here.
-    timeLimitSecs: row.timeLimitSecs,
-  }));
 
   return {
     ok: true,
