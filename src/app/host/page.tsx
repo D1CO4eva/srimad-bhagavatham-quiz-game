@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
 import { GenerateQuizForm } from "./GenerateQuizForm";
 import { QuizDraftCard } from "./QuizDraftCard";
 import { PublishedQuizCard } from "./PublishedQuizCard";
@@ -7,54 +7,74 @@ import { logoutHostAction } from "./login/actions";
 
 export const dynamic = "force-dynamic";
 
+type QuizQuestion = {
+  id: string;
+  type: "MULTIPLE_CHOICE" | "TRUE_FALSE" | "SHORT_ANSWER" | "MULTI_SELECT";
+  question: string;
+  choices: string[];
+  correctChoices: string[];
+  timeLimitSecs: number;
+};
+
+async function withQuestions(doc: FirebaseFirestore.QueryDocumentSnapshot) {
+  const questionsSnap = await doc.ref.collection("questions").orderBy("order").get();
+  const questions: QuizQuestion[] = questionsSnap.docs.map((q) => {
+    const data = q.data();
+    return {
+      id: q.id,
+      type: data.type,
+      question: data.question,
+      choices: data.choices,
+      correctChoices: data.correctChoices,
+      timeLimitSecs: data.timeLimitSecs,
+    };
+  });
+  return { data: doc.data(), questions };
+}
+
 export default async function HostPage() {
-  const [catalog, drafts, published] = await Promise.all([
+  const [catalog, draftsSnap, publishedSnap] = await Promise.all([
     getCourseCatalog(),
-    db.quiz.findMany({
-      where: { status: "DRAFT", mode: "LIVE" },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        title: true,
-        showLeaderboardDefault: true,
-        showTimerDefault: true,
-        scoringMode: true,
-        leadTimeSecs: true,
-        questions: {
-          orderBy: { order: "asc" },
-          select: {
-            id: true,
-            type: true,
-            question: true,
-            choices: true,
-            correctChoices: true,
-            timeLimitSecs: true,
-          },
-        },
-      },
-    }),
-    db.quiz.findMany({
-      where: { status: "PUBLISHED", mode: "LIVE" },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        _count: { select: { questions: true } },
-        questions: {
-          orderBy: { order: "asc" },
-          select: {
-            id: true,
-            type: true,
-            question: true,
-            choices: true,
-            correctChoices: true,
-            timeLimitSecs: true,
-          },
-        },
-      },
-    }),
+    firestore
+      .collection("quizzes")
+      .where("status", "==", "DRAFT")
+      .where("mode", "==", "LIVE")
+      .orderBy("createdAt", "desc")
+      .get(),
+    firestore
+      .collection("quizzes")
+      .where("status", "==", "PUBLISHED")
+      .where("mode", "==", "LIVE")
+      .orderBy("createdAt", "desc")
+      .get(),
   ]);
+
+  const drafts = await Promise.all(
+    draftsSnap.docs.map(async (doc) => {
+      const { data, questions } = await withQuestions(doc);
+      return {
+        id: doc.id,
+        title: data.title as string,
+        showLeaderboardDefault: data.showLeaderboardDefault as boolean,
+        showTimerDefault: data.showTimerDefault as boolean,
+        scoringMode: data.scoringMode as "SPEED" | "ACCURACY",
+        leadTimeSecs: data.leadTimeSecs as number,
+        questions,
+      };
+    })
+  );
+
+  const published = await Promise.all(
+    publishedSnap.docs.map(async (doc) => {
+      const { data, questions } = await withQuestions(doc);
+      return {
+        id: doc.id,
+        title: data.title as string,
+        questionCount: questions.length,
+        questions,
+      };
+    })
+  );
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-8 px-6 py-16 lg:max-w-4xl xl:max-w-5xl">
@@ -97,7 +117,7 @@ export default async function HostPage() {
                 quiz={{
                   id: quiz.id,
                   title: quiz.title,
-                  questionCount: quiz._count.questions,
+                  questionCount: quiz.questionCount,
                   questions: quiz.questions,
                 }}
               />

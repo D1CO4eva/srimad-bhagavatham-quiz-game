@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
 import { notFound } from "next/navigation";
 import { HostLobby } from "./HostLobby";
 import type { LeaderboardEntry, QuestionStartPayload } from "@/lib/events";
@@ -15,21 +15,47 @@ export default async function HostLobbyPage({
   // once the earlier one is COMPLETED (Story 1.3), so this is either the
   // live session or, once the game has ended, the one to show the podium
   // for on reload.
-  const session = await db.gameSession.findFirst({
-    where: { pin },
-    orderBy: { createdAt: "desc" },
-    include: {
-      quiz: true,
-      questions: { orderBy: { order: "asc" }, include: { _count: { select: { answers: true } } } },
-      players: { orderBy: { joinedAt: "asc" } },
-      results: { orderBy: { rank: "asc" }, take: 3 },
-    },
+  const sessionSnap = await firestore
+    .collection("gameSessions")
+    .where("pin", "==", pin)
+    .orderBy("createdAt", "desc")
+    .limit(1)
+    .get();
+  if (sessionSnap.empty) notFound();
+  const sessionDoc = sessionSnap.docs[0];
+  const session = sessionDoc.data();
+
+  // 5 reads total regardless of question count: quiz doc (title), the
+  // frozen questions (answeredCount already maintained incrementally by
+  // submitAnswer — no per-question count query needed here, unlike the
+  // Prisma version's nested _count include), players, and the top-3
+  // results. See the migration plan's Phase 1 "deep nested reads" design.
+  const [quizSnap, questionsSnap, playersSnap, resultsSnap] = await Promise.all([
+    firestore.collection("quizzes").doc(session.quizId).get(),
+    sessionDoc.ref.collection("sessionQuestions").orderBy("order").get(),
+    sessionDoc.ref.collection("players").orderBy("joinedAt", "asc").get(),
+    sessionDoc.ref.collection("results").orderBy("rank", "asc").limit(3).get(),
+  ]);
+
+  const questions = questionsSnap.docs.map((doc) => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      order: data.order as number,
+      type: data.type,
+      question: data.question as string,
+      choices: data.choices as string[],
+      timeLimitSecs: data.timeLimitSecs as number,
+      startedAt: (data.startedAt?.toDate?.() as Date | null) ?? null,
+      optionsRevealedAt: (data.optionsRevealedAt?.toDate?.() as Date | null) ?? null,
+      lockedAt: (data.lockedAt?.toDate?.() as Date | null) ?? null,
+      answeredCount: (data.answeredCount as number | undefined) ?? 0,
+    };
   });
+  const players = playersSnap.docs.map((doc) => ({ id: doc.id, nickname: doc.data().nickname as string }));
 
-  if (!session) notFound();
-
-  const current =
-    session.currentQuestionIndex >= 0 ? session.questions[session.currentQuestionIndex] : null;
+  const currentQuestionIndex = session.currentQuestionIndex as number;
+  const current = currentQuestionIndex >= 0 ? questions[currentQuestionIndex] : null;
 
   const initialQuestion: QuestionStartPayload | null = current
     ? {
@@ -46,32 +72,32 @@ export default async function HostLobbyPage({
 
   const initialPodium: LeaderboardEntry[] | null =
     session.status === "COMPLETED"
-      ? session.results.map((result) => ({
-          playerId: result.playerId,
-          nickname: result.nickname,
-          points: result.totalPoints,
-          rank: result.rank,
-        }))
+      ? resultsSnap.docs.map((doc) => {
+          const result = doc.data();
+          return {
+            playerId: doc.id,
+            nickname: result.nickname as string,
+            points: result.totalPoints as number,
+            rank: result.rank as number,
+          };
+        })
       : null;
 
   return (
     <HostLobby
-      pin={session.pin}
-      quizTitle={session.quiz.title}
-      questionCount={session.questions.length}
-      initialPlayers={session.players.map((player) => ({
-        id: player.id,
-        nickname: player.nickname,
-      }))}
+      pin={session.pin as string}
+      quizTitle={quizSnap.data()?.title as string}
+      questionCount={questions.length}
+      initialPlayers={players}
       joinUrl={`${process.env.NEXT_PUBLIC_APP_URL ?? ""}/join`}
       initialStarted={session.status === "ACTIVE"}
       initialQuestion={initialQuestion}
       initialLocked={Boolean(current?.lockedAt)}
-      initialAnsweredCount={current?._count.answers ?? 0}
-      initialPlayerCount={session.players.length}
+      initialAnsweredCount={current?.answeredCount ?? 0}
+      initialPlayerCount={players.length}
       initialPodium={initialPodium}
-      initialShowLeaderboard={session.showLeaderboard}
-      initialShowTimer={session.showTimer}
+      initialShowLeaderboard={session.showLeaderboard as boolean}
+      initialShowTimer={session.showTimer as boolean}
     />
   );
 }

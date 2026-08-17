@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
 import { summarizeResponses } from "@/lib/quizAnalytics";
 import { ResponseRow } from "./ResponseRow";
 
@@ -9,36 +9,38 @@ export const dynamic = "force-dynamic";
 export default async function SelfPacedScoresPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const quiz = await db.quiz.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      title: true,
-      mode: true,
-      questions: { orderBy: { order: "asc" }, select: { id: true, question: true } },
-      responses: {
-        orderBy: { submittedAt: "desc" },
-        select: {
-          id: true,
-          respondentName: true,
-          respondentEmail: true,
-          respondentPhone: true,
-          respondentCountryCode: true,
-          respondentRegNo: true,
-          score: true,
-          totalQuestions: true,
-          answers: true,
-          submittedAt: true,
-        },
-      },
-    },
-  });
-
-  if (!quiz || quiz.mode !== "SELF_PACED") {
+  const quizRef = firestore.collection("quizzes").doc(id);
+  const [quizSnap, questionsSnap, responsesSnap] = await Promise.all([
+    quizRef.get(),
+    quizRef.collection("questions").orderBy("order").get(),
+    quizRef.collection("responses").orderBy("submittedAt", "desc").get(),
+  ]);
+  if (!quizSnap.exists) {
+    notFound();
+  }
+  const quiz = quizSnap.data()!;
+  if (quiz.mode !== "SELF_PACED") {
     notFound();
   }
 
-  const summary = summarizeResponses(quiz.questions, quiz.responses);
+  const questions = questionsSnap.docs.map((doc) => ({ id: doc.id, question: doc.data().question as string }));
+  const responses = responsesSnap.docs.map((doc) => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      respondentName: data.respondentName as string,
+      respondentEmail: data.respondentEmail as string,
+      respondentPhone: data.respondentPhone as string,
+      respondentCountryCode: data.respondentCountryCode as string,
+      respondentRegNo: data.respondentRegNo as string,
+      score: data.score as number,
+      totalQuestions: data.totalQuestions as number,
+      answers: data.answers,
+      submittedAt: data.submittedAt.toDate() as Date,
+    };
+  });
+
+  const summary = summarizeResponses(questions, responses);
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-8 px-6 py-16 lg:max-w-5xl xl:max-w-6xl">
@@ -83,11 +85,11 @@ export default async function SelfPacedScoresPage({ params }: { params: Promise<
 
       <div>
         <h2 className="text-2xl">Responses</h2>
-        {quiz.responses.length === 0 ? (
+        {responses.length === 0 ? (
           <p className="mt-2 text-ink-soft">No one has submitted this quiz yet.</p>
         ) : (
           <ul className="mt-3 flex flex-col gap-3">
-            {quiz.responses.map((response) => (
+            {responses.map((response) => (
               <ResponseRow key={response.id} response={response} />
             ))}
           </ul>
