@@ -13,7 +13,8 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down"
+    "docker:down": "docker compose down",
+    "emulators:up": "firebase emulators:start --only firestore"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
@@ -21,6 +22,7 @@
     "ably": "^2.26.0",
     "autoevals": "^0.0.132",
     "dotenv": "^17.4.2",
+    "firebase-admin": "^14.2.0",
     "ioredis": "^6.0.0",
     "nanoid": "^6.0.1",
     "next": "16.3.0",
@@ -40,6 +42,7 @@
     "@vitejs/plugin-react": "^6.0.5",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
+    "firebase-tools": "^15.27.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.11",
     "typescript": "^5",

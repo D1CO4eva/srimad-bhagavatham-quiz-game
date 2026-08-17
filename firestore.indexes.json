@@ -1,0 +1,56 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "gameSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "pin", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "answers",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "gameSessionId", "order": "ASCENDING" },
+        { "fieldPath": "playerId", "order": "ASCENDING" },
+        { "fieldPath": "correct", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "questions",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "quizCreatedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "gameSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "pin", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "quizzes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "mode", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "players",
+      "fieldPath": "playerId",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" },
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION_GROUP" }
+      ]
+    }
+  ]
+}

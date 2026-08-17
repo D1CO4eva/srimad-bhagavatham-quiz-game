@@ -10,5 +10,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    env: {
+      // Any test that imports src/lib/firestore.ts talks to the local
+      // Firestore emulator (`npm run emulators:up`), never real Firestore.
+      FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080",
+    },
   },
 });
