@@ -11,36 +11,33 @@ Built feature by feature, on stacked branches, against
 ## Stack
 
 - **Next.js 16** (App Router, TypeScript) — host/player UI + API routes
-- **Prisma 7** + **Postgres** — quizzes, sessions, players, answers, results
+- **Firebase Firestore** (native mode, via `firebase-admin`, server-only) — quizzes, sessions,
+  players, answers, results. See `docs/firestore-migration.md` for the data-model design.
 - **Redis** — live leaderboard (`ZINCRBY` / `ZREVRANGE`) during a session
 - **Ably** — realtime pub/sub per game PIN (`game:{pin}` channel)
 - **Vitest** — unit tests, especially the scoring formula
 
 ## Local development
 
-Requires Docker (for Postgres + Redis) and an [Ably](https://ably.com) API
-key (free tier is fine).
+Requires Docker (for Redis), a JRE on PATH (for the Firestore emulator — e.g.
+`winget install EclipseAdoptium.Temurin.21.JRE` on Windows), and an
+[Ably](https://ably.com) API key (free tier is fine).
 
 ```bash
-cp .env.example .env   # already done for local docker-compose defaults
+cp .env.example .env   # already done for local docker-compose/emulator defaults
 npm install
-npm run docker:up      # starts Postgres + Redis
-npm run db:migrate
-npx tsx prisma/seed.ts # loads one sample quiz so /host has something to pick
+npm run docker:up      # starts Redis
+npm run emulators:up   # starts the local Firestore emulator (separate terminal)
+npm run seed            # loads one sample quiz so /host has something to pick
 npm run dev
 ```
-
-No Docker? `npx prisma dev` starts a local Postgres without it — point
-`DATABASE_URL` at the connection string it prints, then run the same
-`db:migrate`/seed/`dev` steps.
 
 Other scripts:
 
 ```bash
-npm run test           # vitest
+npm run test           # vitest — DB-touching tests run against the Firestore emulator
 npm run lint
 npm run build
-npm run db:studio      # Prisma Studio DB browser
 npm run docker:down
 ```
 
@@ -75,25 +72,23 @@ bearer token (`GENERATE_QUIZ_API_KEY`), no DB persistence. It streams
 `Accept: text/event-stream`, otherwise it awaits generation and returns
 plain JSON.
 
-This app owns its own `Quiz`/`Question` tables — a generated quiz is saved
-as a draft, previewed, and Published before it can be turned into a live
-session. `/host` and all of `/api/quizzes/*` (which now spends the app's own
-OpenRouter budget on generation) sit behind a shared passcode
-(`HOST_PASSCODE`).
+This app owns its own `quizzes`/`questions` Firestore collections — a
+generated quiz is saved as a draft, previewed, and Published before it can be
+turned into a live session. `/host` and all of `/api/quizzes/*` (which now
+spends the app's own OpenRouter budget on generation) sit behind a shared
+passcode (`HOST_PASSCODE`).
 
 ## Deployment
 
 Config is entirely environment-based (see `.env.example`) — dev and prod
 never share credentials.
 
-1. **Postgres**: any hosted Postgres works (Neon, Supabase, Vercel Postgres,
-   etc.). Run `npx prisma migrate deploy` against it once before first
-   traffic — this applies existing migration files, it does not generate
-   new ones (that only happens locally, via `prisma migrate dev`). Prefer a
-   pooled/PgBouncer-style connection string if the host offers one — Vercel's
-   serverless functions each open their own connection, and Feature 9's
-   load-testing notes already flagged connection exhaustion as a real risk
-   worth re-checking against the actual prod database.
+1. **Firestore**: this app deploys onto the `bhagavatham-quiz-game` Firebase
+   project (native mode). No connection string to set — the Admin SDK picks
+   up Application Default Credentials from the deployment environment
+   automatically (Cloud Run's attached service account); `FIRESTORE_EMULATOR_HOST`
+   must be **unset** in prod so it doesn't try to talk to a local emulator.
+   Deploy security rules/indexes with `firebase deploy --only firestore`.
 2. **Redis**: any hosted Redis works (Upstash's free tier is enough for a
    single-class event). Set `REDIS_URL`.
 3. **Ably**: a **separate, real** API key from the dev one — set
@@ -116,7 +111,7 @@ never share credentials.
    HTTPS/WSS is automatic on Vercel and most other platforms; Ably's client
    SDK always negotiates a secure connection on its own regardless.
 
-**Monitoring** (Story 8.2): `GET /api/health` checks Postgres and Redis live
+**Monitoring** (Story 8.2): `GET /api/health` checks Firestore and Redis live
 and Ably's config presence, returning 503 if anything's down. Point an
 external uptime monitor at it (UptimeRobot's free tier is enough) so an
 outage mid-class is caught within seconds instead of being discovered from a

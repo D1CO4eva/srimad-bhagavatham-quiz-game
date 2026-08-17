@@ -9,16 +9,12 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
-    "emulators:up": "firebase emulators:start --only firestore"
+    "emulators:up": "firebase emulators:start --only firestore",
+    "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.9.1",
-    "@prisma/client": "^7.9.1",
     "ably": "^2.26.0",
     "autoevals": "^0.0.132",
     "dotenv": "^17.4.2",
@@ -27,8 +23,6 @@
     "nanoid": "^6.0.1",
     "next": "16.3.0",
     "openai": "^6.49.0",
-    "pg": "^8.23.0",
-    "prisma": "^7.9.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "zod": "^4.4.3"
@@ -43,6 +37,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "firebase-tools": "^15.27.0",
+    "pg": "^8.23.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.11",
     "typescript": "^5",
