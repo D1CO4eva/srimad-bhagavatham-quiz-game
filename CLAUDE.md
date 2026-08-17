@@ -27,43 +27,51 @@ self-paced Google-Forms-style quizzes at `/quiz/[slug]` with no live session.
 
 ```bash
 npm run dev             # start Next.js dev server
-npm run docker:up       # start local Postgres + Redis (needed before dev/test)
+npm run docker:up       # start local Redis (needed before dev/test)
 npm run docker:down
-npm run db:migrate      # prisma migrate dev — generates + applies a new migration
-npm run db:studio       # Prisma Studio DB browser
+npm run emulators:up    # start the local Firestore emulator (needs a JRE — see below)
 npm run build
 npm run lint
-npm test                # vitest run (single pass)
+npm test                # vitest run (single pass) — DB-touching tests run against the Firestore emulator
 npm run test:watch      # vitest watch mode
 npx vitest run src/lib/scoring.test.ts   # run a single test file
-npx tsx prisma/seed.ts  # seed one sample quiz so /host has something to pick
+npm run seed             # seed one sample quiz so /host has something to pick
 ```
 
-No Docker? `npx prisma dev` starts a local Postgres without it — see `README.md` for the flow.
-There is no CI — `lint`/`test` are only enforced by whoever runs them locally, so run both before
-calling a change done.
+The Firestore emulator is JVM-based — needs a local JRE on PATH (e.g.
+`winget install EclipseAdoptium.Temurin.21.JRE` on Windows) that isn't part of `firebase-tools`
+itself. There is no CI — `lint`/`test` are only enforced by whoever runs them locally, so run both
+before calling a change done.
 
 ## Architecture
 
 **Stack**: Next.js 16 App Router + TypeScript (breaking changes vs. training data — see
-`AGENTS.md`/`node_modules/next/dist/docs/`), Prisma 7 + Postgres, Redis (live leaderboard via
-`ZINCRBY`/`ZREVRANGE`), Ably (realtime pub/sub per game PIN, channel `game:{pin}`), Vitest.
+`AGENTS.md`/`node_modules/next/dist/docs/`), Firebase Firestore (via `firebase-admin`, server-only —
+see `src/lib/firestore.ts`), Redis (live leaderboard via `ZINCRBY`/`ZREVRANGE`), Ably (realtime
+pub/sub per game PIN, channel `game:{pin}`), Vitest.
 
 **Layering**: `src/app/api/**/route.ts` handlers stay thin — parse/delegate/respond — with real
 logic living in `src/lib/*.ts`. Tests are colocated as `*.test.ts` next to the module they cover in
-`src/lib/` (not a separate `__tests__` tree). Prisma client is generated into `src/generated/prisma/`
-— never hand-edit it, and don't hold it to normal code-quality checks.
+`src/lib/` (not a separate `__tests__` tree).
 
-**Data model** (`prisma/schema.prisma`, heavily comment-documented — read it directly for details):
-- `Quiz` → `Question[]` is the authored/generated template; `mode` splits it into `LIVE`
-  (Kahoot-style) vs `SELF_PACED` (`/quiz/[slug]`, `responsesOpen`/`opensAt`/`closesAt` gate access).
-- `GameSession` is one live instance of a `Quiz`, identified by `pin`. Its questions are **frozen** at
-  creation into `GameSessionQuestion` (copied from `Question`) so editing the source quiz mid-session
-  never affects a running game.
-- `Player`, `Answer` (graded at submission), `SessionResult` (final standings, snapshotted from Redis
-  once the last leaderboard closes) round out the live-session flow.
-- `QuizResponse` is one row per self-paced submission, with a self-contained JSON snapshot of
-  questions/answers so it stays meaningful even if the source `Question` rows change later.
+**Data model** (Firestore, native mode — `firestore.rules`/`firestore.indexes.json` at the repo
+root; migrated off Prisma/Postgres, see `docs/firestore-migration.md` for the full design rationale):
+- `quizzes/{id}` → `questions/{id}` subcollection is the authored/generated template; `mode` splits
+  it into `LIVE` (Kahoot-style) vs `SELF_PACED` (`/quiz/[slug]`, `responsesOpen`/`opensAt`/`closesAt`
+  gate access). `responses/{sha256(regNo)}` (doc ID = a hash of the respondent's registration number)
+  holds self-paced submissions.
+- `gameSessions/{id}` (top-level, looked up by `pin`) is one live instance of a Quiz. Its questions
+  are **frozen** at creation into a `sessionQuestions/{id}` subcollection (batch-copied from the
+  source Quiz's `questions`, deliberately a different subcollection name to avoid colliding with it
+  in collection-group queries) so editing the source quiz mid-session never affects a running game.
+  Each frozen question doc also carries incrementally-maintained tally fields
+  (`answeredCount`/`correctCount`/`incorrectCount`/`choiceCounts` — the last a **map**, `{"0": n,
+  ...}`, not an array; Firestore's dotted-path field updates only address map fields) updated inside
+  `submitAnswer`'s transaction, so reads never need to aggregate over the `answers` subcollection.
+- `players/{id}` and `results/{id}` (doc ID = playerId in both) live under each `gameSessions/{id}`.
+  `answers/{playerId}` lives under each `sessionQuestions/{id}` — doc-ID-as-key gives the
+  once-per-question and once-per-session uniqueness constraints for free via Firestore's own
+  create()-fails-if-exists behavior, no separate unique-constraint handling needed.
 
 **Scoring** (`src/lib/scoring.ts`) is the one piece of logic held to "provably correct": pure
 functions, no I/O, unit-tested against hand-calculated cases. Server-authoritative — reaction time is
@@ -89,10 +97,6 @@ token (`GENERATE_QUIZ_API_KEY`), independent of this app's own DB-backed `/api/q
 `src/lib/hostAuth.ts`), session cookie signed with `SESSION_SECRET`. There's no per-user auth model —
 one shared host secret is the whole system.
 
-**DB connections** (`src/lib/db.ts`): explicit Prisma/`pg` pool sizing (`max: 20`) rather than driver
-defaults, because bursty concurrent traffic (many players joining/answering at once) is this app's
-normal shape, not an edge case — see `load-test/README.md` for the load-testing story behind this.
-
 ## Conventions
 
 - `camelCase.ts` for `src/lib` modules, `PascalCase.tsx` for components, `route.ts` for API handlers,
@@ -115,5 +119,8 @@ CI, etc.), see the `clean-codebase` skill (`.claude/skills/clean-codebase/SKILL.
 
 - `docs/qa-checklist.md` — what's verified vs. what still needs a human/real deployment.
 - `docs/formula-audit.md` — correctness verification for the scoring formula.
-- `load-test/README.md` — k6-based load testing for the 500-1000-player worst case, including a real
-  finding about `prisma dev`'s local connection ceiling (not a production concern).
+- `docs/firestore-migration.md` — the Postgres/Prisma → Firestore migration's data-model design
+  rationale (denormalization decisions, why `sessionQuestions` isn't named `questions`, the
+  doc-ID-as-natural-key pattern, incrementally-maintained counters) and real findings from building
+  it.
+- `load-test/README.md` — k6-based load testing for the 500-1000-player worst case.
