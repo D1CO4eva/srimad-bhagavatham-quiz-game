@@ -1,5 +1,6 @@
 import { redis } from "@/lib/redis";
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
+import { FieldValue } from "firebase-admin/firestore";
 import { publishToSession } from "@/lib/ably";
 import { SessionEvent, type LeaderboardEntry as PublicLeaderboardEntry } from "@/lib/events";
 
@@ -49,29 +50,47 @@ export async function getPlayerRank(
   return { rank: rank + 1, points: Number(points), totalPlayers };
 }
 
+/** Any session at this pin, matching the original Prisma query's own lack of
+ * a status filter (findFirst with no orderBy) — not something this port
+ * needs to tighten. */
+async function findSessionByPin(pin: string) {
+  const snap = await firestore.collection("gameSessions").where("pin", "==", pin).limit(1).get();
+  return snap.empty ? null : snap.docs[0];
+}
+
 /** How many of the player's answers this session were correct, out of how
  * many they've answered so far — the "X/Y correct" summary shown alongside
- * rank (Story: show right/total regardless of whether the leaderboard is on). */
+ * rank (Story: show right/total regardless of whether the leaderboard is on).
+ * Answer docs live at gameSessions/{id}/questions/{qid}/answers/{playerId} —
+ * gameSessionId and playerId are denormalized fields on each Answer doc
+ * (see submitAnswer in questions.ts) specifically so this collection-group
+ * query can scope across every question in the session without needing the
+ * per-question doc IDs. */
 export async function getPlayerProgress(
   pin: string,
   playerId: string
 ): Promise<{ correctCount: number; answeredCount: number } | null> {
-  const session = await db.gameSession.findFirst({ where: { pin }, select: { id: true } });
-  if (!session) return null;
-  const [correctCount, answeredCount] = await Promise.all([
-    db.answer.count({ where: { playerId, correct: true, gameSessionQuestion: { gameSessionId: session.id } } }),
-    db.answer.count({ where: { playerId, gameSessionQuestion: { gameSessionId: session.id } } }),
+  const sessionDoc = await findSessionByPin(pin);
+  if (!sessionDoc) return null;
+
+  const answersGroup = firestore.collectionGroup("answers");
+  const [correctSnap, answeredSnap] = await Promise.all([
+    answersGroup
+      .where("gameSessionId", "==", sessionDoc.id)
+      .where("playerId", "==", playerId)
+      .where("correct", "==", true)
+      .count()
+      .get(),
+    answersGroup.where("gameSessionId", "==", sessionDoc.id).where("playerId", "==", playerId).count().get(),
   ]);
-  return { correctCount, answeredCount };
+  return { correctCount: correctSnap.data().count, answeredCount: answeredSnap.data().count };
 }
 
-async function withNicknames(entries: LeaderboardEntry[]) {
+async function withNicknames(entries: LeaderboardEntry[], sessionId: string) {
   if (!entries.length) return [];
-  const players = await db.player.findMany({
-    where: { id: { in: entries.map((entry) => entry.playerId) } },
-    select: { id: true, nickname: true },
-  });
-  const nicknameById = new Map(players.map((player) => [player.id, player.nickname]));
+  const playersRef = firestore.collection("gameSessions").doc(sessionId).collection("players");
+  const docs = await firestore.getAll(...entries.map((entry) => playersRef.doc(entry.playerId)));
+  const nicknameById = new Map(docs.map((doc) => [doc.id, doc.exists ? (doc.data()!.nickname as string) : undefined]));
   return entries.map((entry) => ({
     ...entry,
     nickname: nicknameById.get(entry.playerId) ?? "Unknown",
@@ -80,40 +99,44 @@ async function withNicknames(entries: LeaderboardEntry[]) {
 
 /** Broadcasts the top-N leaderboard after a question's grading window closes (Story 5.1). */
 export async function publishLeaderboardUpdate(pin: string): Promise<void> {
-  const top = await withNicknames(await getTopN(pin, TOP_N));
+  const sessionDoc = await findSessionByPin(pin);
+  if (!sessionDoc) return;
+  const top = await withNicknames(await getTopN(pin, TOP_N), sessionDoc.id);
   await publishToSession(pin, SessionEvent.LeaderboardUpdate, { leaderboard: top });
 }
 
 /**
  * Ends the session: snapshots the full Redis leaderboard into SessionResult
- * rows (so standings survive Redis eventually expiring the key), marks the
- * session COMPLETED, and broadcasts the top-3 podium (Story 5.3).
+ * docs (so standings survive Redis eventually expiring the key), marks the
+ * session COMPLETED, and broadcasts the top-3 podium (Story 5.3). The N
+ * SessionResult upserts have no read-your-own-write dependency on each
+ * other (the Redis snapshot is already fully computed before any Firestore
+ * write starts) and always fit Firestore's 500-doc batch limit given the
+ * 190-player session cap, so a WriteBatch is the right primitive here, not
+ * runTransaction (see the migration plan's Phase 2 spike notes).
  */
 export async function finalizeSession(pin: string): Promise<PublicLeaderboardEntry[]> {
-  const session = await db.gameSession.findFirst({ where: { pin }, select: { id: true, showLeaderboard: true } });
-  if (!session) return [];
+  const sessionDoc = await findSessionByPin(pin);
+  if (!sessionDoc) return [];
+  const session = sessionDoc.data();
 
-  const full = await withNicknames(await getTopN(pin, "all"));
+  const full = await withNicknames(await getTopN(pin, "all"), sessionDoc.id);
 
-  await db.$transaction([
-    db.gameSession.update({
-      where: { id: session.id },
-      data: { status: "COMPLETED", endedAt: new Date() },
-    }),
-    ...full.map((entry) =>
-      db.sessionResult.upsert({
-        where: { gameSessionId_playerId: { gameSessionId: session.id, playerId: entry.playerId } },
-        create: {
-          gameSessionId: session.id,
-          playerId: entry.playerId,
-          nickname: entry.nickname,
-          rank: entry.rank,
-          totalPoints: entry.points,
-        },
-        update: { rank: entry.rank, totalPoints: entry.points, nickname: entry.nickname },
-      })
-    ),
-  ]);
+  const batch = firestore.batch();
+  batch.update(sessionDoc.ref, { status: "COMPLETED", endedAt: FieldValue.serverTimestamp() });
+  const resultsRef = sessionDoc.ref.collection("results");
+  for (const entry of full) {
+    // doc ID = playerId gives the [gameSessionId, playerId] uniqueness for
+    // free — every write here is an unconditional set(), not a real
+    // create/update branch, since there's nothing to conditionally check.
+    batch.set(resultsRef.doc(entry.playerId), {
+      nickname: entry.nickname,
+      rank: entry.rank,
+      totalPoints: entry.points,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  }
+  await batch.commit();
 
   const podium = full.slice(0, PODIUM_SIZE);
   // showLeaderboard as of the last question (nothing changes it after the
@@ -122,7 +145,7 @@ export async function finalizeSession(pin: string): Promise<PublicLeaderboardEnt
   await publishToSession(pin, SessionEvent.Podium, {
     podium,
     totalPlayers: full.length,
-    showLeaderboard: session.showLeaderboard,
+    showLeaderboard: session.showLeaderboard as boolean,
   });
   return podium;
 }

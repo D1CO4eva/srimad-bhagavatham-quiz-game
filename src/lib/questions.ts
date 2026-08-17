@@ -1,4 +1,5 @@
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
+import { FieldValue, Timestamp, type DocumentReference, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { redis } from "@/lib/redis";
 import { publishToSession } from "@/lib/ably";
 import { SessionEvent, type QuestionStartPayload } from "@/lib/events";
@@ -40,25 +41,88 @@ export function toPublicQuestion(question: {
   };
 }
 
-type QuestionRow = {
+type GsQuestion = {
+  ref: DocumentReference;
   id: string;
   order: number;
   type: QuestionStartPayload["type"];
   question: string;
   choices: string[];
+  correctChoices: string[];
   timeLimitSecs: number;
   startedAt: Date | null;
+  optionsRevealedAt: Date | null;
+  lockedAt: Date | null;
+  quoteText: string | null;
+  quoteAttribution: string | null;
 };
+
+type ActiveSession = {
+  ref: DocumentReference;
+  id: string;
+  currentQuestionIndex: number;
+  leadTimeSecs: number;
+  showTimer: boolean;
+  scoringMode: "SPEED" | "ACCURACY";
+  questions: GsQuestion[];
+};
+
+function toDateOrNull(value: Timestamp | null | undefined): Date | null {
+  return value ? value.toDate() : null;
+}
+
+function toGsQuestion(doc: QueryDocumentSnapshot): GsQuestion {
+  const data = doc.data();
+  return {
+    ref: doc.ref,
+    id: doc.id,
+    order: data.order,
+    type: data.type,
+    question: data.question,
+    choices: data.choices,
+    correctChoices: data.correctChoices,
+    timeLimitSecs: data.timeLimitSecs,
+    startedAt: toDateOrNull(data.startedAt),
+    optionsRevealedAt: toDateOrNull(data.optionsRevealedAt),
+    lockedAt: toDateOrNull(data.lockedAt),
+    quoteText: data.quoteText ?? null,
+    quoteAttribution: data.quoteAttribution ?? null,
+  };
+}
+
+/** The repeated "active session + its ordered frozen questions" read used by
+ * every function below — one place instead of hand-rolling it 4 times. */
+async function findActiveSessionWithQuestions(pin: string): Promise<ActiveSession | null> {
+  const sessionSnap = await firestore
+    .collection("gameSessions")
+    .where("pin", "==", pin)
+    .where("status", "==", "ACTIVE")
+    .limit(1)
+    .get();
+  if (sessionSnap.empty) return null;
+  const sessionDoc = sessionSnap.docs[0];
+  const data = sessionDoc.data();
+  // "sessionQuestions", not "questions" — see the naming note in
+  // createGameSession (src/lib/sessions.ts) for why the frozen per-session
+  // copy uses a different subcollection name than the Quiz's own bank.
+  const questionsSnap = await sessionDoc.ref.collection("sessionQuestions").orderBy("order").get();
+  return {
+    ref: sessionDoc.ref,
+    id: sessionDoc.id,
+    currentQuestionIndex: data.currentQuestionIndex,
+    leadTimeSecs: data.leadTimeSecs,
+    showTimer: data.showTimer,
+    scoringMode: data.scoringMode,
+    questions: questionsSnap.docs.map(toGsQuestion),
+  };
+}
 
 /** Sets startedAt/optionsRevealedAt and broadcasts question_start with a
  * server timestamp clients use to sync their countdowns (Story 3.1, 3.3). */
-async function startQuestion(pin: string, leadTimeSecs: number, question: QuestionRow) {
+async function startQuestion(pin: string, leadTimeSecs: number, question: GsQuestion) {
   const startedAt = new Date();
   const optionsRevealedAt = new Date(startedAt.getTime() + leadTimeSecs * 1000);
-  await db.gameSessionQuestion.update({
-    where: { id: question.id },
-    data: { startedAt, optionsRevealedAt },
-  });
+  await question.ref.update({ startedAt, optionsRevealedAt });
   const payload = toPublicQuestion({ ...question, startedAt, optionsRevealedAt });
   await publishToSession(pin, SessionEvent.QuestionStart, payload);
   return payload;
@@ -75,10 +139,7 @@ async function startQuestion(pin: string, leadTimeSecs: number, question: Questi
  * starts immediately and this returns its question_start payload.
  */
 export async function advanceToNextQuestion(pin: string): Promise<QuestionStartPayload | null> {
-  const session = await db.gameSession.findFirst({
-    where: { pin, status: "ACTIVE" },
-    include: { questions: { orderBy: { order: "asc" } } },
-  });
+  const session = await findActiveSessionWithQuestions(pin);
   if (!session) throw new QuestionFlowError(`No active session for PIN ${pin}.`);
 
   // A quote is already showing for the current question and the host hasn't
@@ -93,10 +154,7 @@ export async function advanceToNextQuestion(pin: string): Promise<QuestionStartP
   const nextQuestion = session.questions[nextIndex];
   if (!nextQuestion) throw new QuestionFlowError("No more questions in this session.");
 
-  await db.gameSession.update({
-    where: { id: session.id },
-    data: { currentQuestionIndex: nextIndex },
-  });
+  await session.ref.update({ currentQuestionIndex: nextIndex });
 
   if (nextQuestion.quoteText && nextQuestion.quoteAttribution) {
     await publishToSession(pin, SessionEvent.QuoteDisplay, {
@@ -114,10 +172,7 @@ export async function advanceToNextQuestion(pin: string): Promise<QuestionStartP
  * question that's already started (e.g. a duplicate click) is just returned
  * as-is rather than re-started. */
 export async function revealQuestionAfterQuote(pin: string): Promise<QuestionStartPayload> {
-  const session = await db.gameSession.findFirst({
-    where: { pin, status: "ACTIVE" },
-    include: { questions: { orderBy: { order: "asc" } } },
-  });
+  const session = await findActiveSessionWithQuestions(pin);
   const current = session?.questions[session.currentQuestionIndex];
   if (!session || !current) throw new QuestionFlowError(`No live question for PIN ${pin}.`);
   if (current.startedAt) return toPublicQuestion(current);
@@ -134,20 +189,19 @@ export async function revealQuestionAfterQuote(pin: string): Promise<QuestionSta
  * Once locked, this is also the session's "grading window closed" moment
  * (Story 5.1): the leaderboard broadcasts here, and if this was the last
  * question, the session is finalized straight into the podium (Story 5.3).
+ *
+ * correctCount/incorrectCount/choiceCounts are read directly off the
+ * question doc rather than aggregated here — submitAnswer maintains them
+ * incrementally on every answer (see below), turning what was an N-answer
+ * read-and-tally into a single-doc read (migration plan, Phase 1).
  */
 export async function lockCurrentQuestion(pin: string) {
-  const session = await db.gameSession.findFirst({
-    where: { pin, status: "ACTIVE" },
-    include: { questions: { orderBy: { order: "asc" } } },
-  });
+  const session = await findActiveSessionWithQuestions(pin);
   const current = session?.questions[session.currentQuestionIndex];
   if (!session || !current) throw new QuestionFlowError(`No live question for PIN ${pin}.`);
 
   if (!current.lockedAt) {
-    await db.gameSessionQuestion.update({
-      where: { id: current.id },
-      data: { lockedAt: new Date() },
-    });
+    await current.ref.update({ lockedAt: new Date() });
   }
   await publishToSession(pin, SessionEvent.QuestionLocked, {
     questionId: current.id,
@@ -155,28 +209,16 @@ export async function lockCurrentQuestion(pin: string) {
   });
   await publishLeaderboardUpdate(pin);
 
-  const breakdown = await db.answer.groupBy({
-    by: ["correct"],
-    where: { gameSessionQuestionId: current.id },
-    _count: true,
-  });
-  const correctCount = breakdown.find((row) => row.correct)?._count ?? 0;
-  const incorrectCount = breakdown.find((row) => !row.correct)?._count ?? 0;
-
-  // Per-choice tally for the host's "answers by choice" bar graph. Tallied
-  // in JS rather than a groupBy — choiceIndices is an array (MULTI_SELECT
-  // can pick more than one), so a single answer can count toward more than
-  // one bucket, which Prisma's groupBy can't express directly.
-  const allAnswers = await db.answer.findMany({
-    where: { gameSessionQuestionId: current.id },
-    select: { choiceIndices: true },
-  });
-  const choiceCounts = new Array(current.choices.length).fill(0) as number[];
-  for (const answer of allAnswers) {
-    for (const choiceIndex of answer.choiceIndices) {
-      if (choiceIndex >= 0 && choiceIndex < choiceCounts.length) choiceCounts[choiceIndex]++;
-    }
-  }
+  // Re-read for the freshest counters — lockedAt above doesn't block
+  // already-in-flight submissions (it's a UI signal, not the deadline
+  // authority; see submitAnswer's own deadline check), so a submission can
+  // still land between the update above and this read.
+  const freshSnap = await current.ref.get();
+  const fresh = freshSnap.data() ?? {};
+  const correctCount = (fresh.correctCount as number | undefined) ?? 0;
+  const incorrectCount = (fresh.incorrectCount as number | undefined) ?? 0;
+  const choiceCountsMap = (fresh.choiceCounts as Record<string, number> | undefined) ?? {};
+  const choiceCounts = current.choices.map((_, i) => choiceCountsMap[String(i)] ?? 0);
 
   await publishToSession(pin, SessionEvent.AnswerBreakdown, { correctCount, incorrectCount, choiceCounts });
 
@@ -216,12 +258,19 @@ export class AnswerRejectedError extends Error {
  * second submission for the same question (Story 3.4 / QA 9.1
  * rapid-double-submit case). Grading uses only server-received timestamps
  * (Story 4.1) — nothing client-submitted about timing is ever trusted.
+ *
+ * The Answer doc's ID is the playerId, so the create() below fails
+ * atomically if this player already answered — replacing the old unique-
+ * constraint-violation catch with Firestore's own doc-ID uniqueness. It's
+ * written in the same transaction as the question doc's counter increments
+ * (answeredCount/correctCount/incorrectCount/choiceCounts) so a lock-time
+ * read of those counters (see lockCurrentQuestion) is never out of sync
+ * with the actual Answer docs. Confirmed safe at this app's real worst case
+ * (190 concurrent submits to one question) in the migration plan's Phase 2
+ * spike — plain transactions, no sharded counters needed.
  */
 export async function submitAnswer(pin: string, playerId: string, questionId: string, choiceIndices: number[]) {
-  const session = await db.gameSession.findFirst({
-    where: { pin, status: "ACTIVE" },
-    include: { questions: { orderBy: { order: "asc" } } },
-  });
+  const session = await findActiveSessionWithQuestions(pin);
   const current = session?.questions[session.currentQuestionIndex];
   if (!session || !current || current.id !== questionId) {
     throw new AnswerRejectedError("That question is not currently live.");
@@ -253,29 +302,24 @@ export async function submitAnswer(pin: string, playerId: string, questionId: st
     throw new AnswerRejectedError("choiceIndices is invalid for this question.");
   }
 
-  const player = await db.player.findUnique({
-    where: { id: playerId },
-    select: { gameSessionId: true, estimatedLatencyMs: true },
-  });
-  if (!player || player.gameSessionId !== session.id) {
+  const playerSnap = await session.ref.collection("players").doc(playerId).get();
+  if (!playerSnap.exists) {
     throw new AnswerRejectedError("Player does not belong to this session.");
   }
+  const estimatedLatencyMs = (playerSnap.data()?.estimatedLatencyMs as number | null | undefined) ?? 0;
 
   const timeLimitMs = current.timeLimitSecs * 1000;
   const rawReactionTimeMs = computeRawReactionTimeMs(serverReceivedAt.getTime(), revealAt.getTime());
-  const trueReactionTimeMs = computeTrueReactionTimeMs(
-    rawReactionTimeMs,
-    player.estimatedLatencyMs ?? 0,
-    timeLimitMs
-  );
+  const trueReactionTimeMs = computeTrueReactionTimeMs(rawReactionTimeMs, estimatedLatencyMs, timeLimitMs);
   const correctFraction = computeCorrectFraction(current.choices, current.correctChoices, choiceIndices);
   const correct = correctFraction >= 1;
   const points = computePoints(correctFraction, trueReactionTimeMs, timeLimitMs, session.scoringMode);
 
+  const answerRef = current.ref.collection("answers").doc(playerId);
   try {
-    await db.answer.create({
-      data: {
-        gameSessionQuestionId: current.id,
+    await firestore.runTransaction(async (tx) => {
+      tx.create(answerRef, {
+        gameSessionId: session.id,
         playerId,
         choiceIndices,
         serverReceivedAt,
@@ -283,7 +327,19 @@ export async function submitAnswer(pin: string, playerId: string, questionId: st
         points,
         rawReactionTimeMs,
         trueReactionTimeMs,
-      },
+      });
+      const increments: Record<string, FirebaseFirestore.FieldValue> = {
+        answeredCount: FieldValue.increment(1),
+        [correct ? "correctCount" : "incorrectCount"]: FieldValue.increment(1),
+      };
+      // choiceCounts is a MAP (string index -> count), not an array —
+      // Firestore dotted-path updates address map fields, never array
+      // indices; pointing one at an array field silently converts it to a
+      // map and drops the other elements (confirmed in the Phase 2 spike).
+      for (const choiceIndex of choiceIndices) {
+        increments[`choiceCounts.${choiceIndex}`] = FieldValue.increment(1);
+      }
+      tx.update(current.ref, increments);
     });
   } catch {
     throw new AnswerRejectedError("You already answered this question.");
@@ -291,8 +347,12 @@ export async function submitAnswer(pin: string, playerId: string, questionId: st
 
   await addPoints(pin, playerId, points);
 
-  const answeredCount = await db.answer.count({ where: { gameSessionQuestionId: current.id } });
-  const playerCount = await db.player.count({ where: { gameSessionId: session.id } });
+  const [freshQuestionSnap, playerCountSnap] = await Promise.all([
+    current.ref.get(),
+    session.ref.collection("players").count().get(),
+  ]);
+  const answeredCount = (freshQuestionSnap.data()?.answeredCount as number | undefined) ?? 0;
+  const playerCount = playerCountSnap.data().count;
   if (await shouldPublishAnswerCountUpdate(pin)) {
     await publishToSession(pin, SessionEvent.AnswerCountUpdate, { answeredCount, playerCount });
   }
