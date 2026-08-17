@@ -13,8 +13,6 @@ COPY . .
 # --set-build-env-vars maps to --build-arg for Dockerfile-based source builds).
 ARG NEXT_PUBLIC_APP_URL
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
-# Prisma Client is generated against the schema at build time; no DB access needed.
-RUN npx prisma generate
 RUN npm run build
 
 FROM node:22-slim AS runner
