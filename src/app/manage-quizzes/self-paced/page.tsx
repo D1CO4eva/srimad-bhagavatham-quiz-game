@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
 import { GenerateQuizForm } from "@/app/host/GenerateQuizForm";
 import { getCourseCatalog, toPublicCourseWeeks } from "@/lib/courseCatalog";
 import { logoutHostAction } from "@/app/host/login/actions";
@@ -7,57 +7,80 @@ import { SelfPacedQuizCard } from "./SelfPacedQuizCard";
 
 export const dynamic = "force-dynamic";
 
+type QuizQuestion = {
+  id: string;
+  type: "MULTIPLE_CHOICE" | "TRUE_FALSE" | "SHORT_ANSWER" | "MULTI_SELECT";
+  question: string;
+  choices: string[];
+  correctChoices: string[];
+  timeLimitSecs: number;
+};
+
+async function withQuestions(doc: FirebaseFirestore.QueryDocumentSnapshot) {
+  const questionsSnap = await doc.ref.collection("questions").orderBy("order").get();
+  const questions: QuizQuestion[] = questionsSnap.docs.map((q) => {
+    const data = q.data();
+    return {
+      id: q.id,
+      type: data.type,
+      question: data.question,
+      choices: data.choices,
+      correctChoices: data.correctChoices,
+      timeLimitSecs: data.timeLimitSecs,
+    };
+  });
+  return { data: doc.data(), questions };
+}
+
 export default async function SelfPacedDashboardPage() {
-  const [catalog, drafts, published] = await Promise.all([
+  const [catalog, draftsSnap, publishedSnap] = await Promise.all([
     getCourseCatalog(),
-    db.quiz.findMany({
-      where: { status: "DRAFT", mode: "SELF_PACED" },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        title: true,
-        slug: true,
-        responsesOpen: true,
-        opensAt: true,
-        closesAt: true,
-        questions: {
-          orderBy: { order: "asc" },
-          select: {
-            id: true,
-            type: true,
-            question: true,
-            choices: true,
-            correctChoices: true,
-            timeLimitSecs: true,
-          },
-        },
-      },
-    }),
-    db.quiz.findMany({
-      where: { status: "PUBLISHED", mode: "SELF_PACED" },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        title: true,
-        slug: true,
-        responsesOpen: true,
-        opensAt: true,
-        closesAt: true,
-        _count: { select: { questions: true, responses: true } },
-        questions: {
-          orderBy: { order: "asc" },
-          select: {
-            id: true,
-            type: true,
-            question: true,
-            choices: true,
-            correctChoices: true,
-            timeLimitSecs: true,
-          },
-        },
-      },
-    }),
+    firestore
+      .collection("quizzes")
+      .where("status", "==", "DRAFT")
+      .where("mode", "==", "SELF_PACED")
+      .orderBy("createdAt", "desc")
+      .get(),
+    firestore
+      .collection("quizzes")
+      .where("status", "==", "PUBLISHED")
+      .where("mode", "==", "SELF_PACED")
+      .orderBy("createdAt", "desc")
+      .get(),
   ]);
+
+  const drafts = await Promise.all(
+    draftsSnap.docs.map(async (doc) => {
+      const { data, questions } = await withQuestions(doc);
+      return {
+        id: doc.id,
+        title: data.title as string,
+        slug: (data.slug as string | null) ?? null,
+        responsesOpen: data.responsesOpen as boolean,
+        opensAt: data.opensAt?.toDate?.() ?? null,
+        closesAt: data.closesAt?.toDate?.() ?? null,
+        questions,
+      };
+    })
+  );
+
+  const published = await Promise.all(
+    publishedSnap.docs.map(async (doc) => {
+      const { data, questions } = await withQuestions(doc);
+      const responseCountSnap = await doc.ref.collection("responses").count().get();
+      return {
+        id: doc.id,
+        title: data.title as string,
+        slug: (data.slug as string | null) ?? null,
+        responsesOpen: data.responsesOpen as boolean,
+        opensAt: (data.opensAt?.toDate?.() as Date | null) ?? null,
+        closesAt: (data.closesAt?.toDate?.() as Date | null) ?? null,
+        questionCount: questions.length,
+        responseCount: responseCountSnap.data().count,
+        questions,
+      };
+    })
+  );
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-8 px-6 py-16 lg:max-w-4xl xl:max-w-5xl">
@@ -106,8 +129,8 @@ export default async function SelfPacedDashboardPage() {
                   responsesOpen: quiz.responsesOpen,
                   opensAt: quiz.opensAt ? quiz.opensAt.toISOString() : null,
                   closesAt: quiz.closesAt ? quiz.closesAt.toISOString() : null,
-                  questionCount: quiz._count.questions,
-                  responseCount: quiz._count.responses,
+                  questionCount: quiz.questionCount,
+                  responseCount: quiz.responseCount,
                   questions: quiz.questions,
                 }}
               />

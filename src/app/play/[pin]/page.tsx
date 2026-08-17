@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { firestore } from "@/lib/firestore";
 import { notFound } from "next/navigation";
 import { PlayerLobby } from "./PlayerLobby";
 import { DynamicRejoinFromStorage as RejoinFromStorage } from "./DynamicRejoin";
@@ -21,25 +21,42 @@ export default async function PlayPage({
     return <RejoinFromStorage pin={pin} />;
   }
 
-  // The player's own id already pins down which session (and its status)
-  // they belong to — no ambiguity from a reused PIN the way the host's
-  // PIN-only lookup has to handle.
-  const player = await db.player.findUnique({
-    where: { id: playerId },
-    include: {
-      gameSession: {
-        include: {
-          questions: { orderBy: { order: "asc" } },
-          results: { orderBy: { rank: "asc" }, take: 3 },
-        },
-      },
-    },
-  });
-  if (!player || player.gameSession.pin !== pin) notFound();
+  // The player's own id already pins down which session they belong to —
+  // no ambiguity from a reused PIN the way the host's PIN-only lookup has
+  // to handle. Resolved via the redundant playerId field on the Player doc
+  // (see src/lib/players.ts) since a bare playerId alone doesn't say which
+  // session's subcollection it lives in.
+  const playerSnap = await firestore.collectionGroup("players").where("playerId", "==", playerId).limit(1).get();
+  if (playerSnap.empty) notFound();
+  const playerDoc = playerSnap.docs[0];
+  const sessionRef = playerDoc.ref.parent.parent!;
+  const sessionSnap = await sessionRef.get();
+  const session = sessionSnap.data()!;
+  if (session.pin !== pin) notFound();
 
-  const { gameSession } = player;
-  const current =
-    gameSession.currentQuestionIndex >= 0 ? gameSession.questions[gameSession.currentQuestionIndex] : null;
+  const [questionsSnap, resultsSnap] = await Promise.all([
+    sessionRef.collection("sessionQuestions").orderBy("order").get(),
+    sessionRef.collection("results").orderBy("rank", "asc").limit(3).get(),
+  ]);
+  const questions = questionsSnap.docs.map((doc) => {
+    const data = doc.data();
+    return {
+      ref: doc.ref,
+      id: doc.id,
+      order: data.order as number,
+      type: data.type,
+      question: data.question as string,
+      choices: data.choices as string[],
+      correctChoices: data.correctChoices as string[],
+      timeLimitSecs: data.timeLimitSecs as number,
+      startedAt: (data.startedAt?.toDate?.() as Date | null) ?? null,
+      optionsRevealedAt: (data.optionsRevealedAt?.toDate?.() as Date | null) ?? null,
+      lockedAt: (data.lockedAt?.toDate?.() as Date | null) ?? null,
+    };
+  });
+
+  const currentQuestionIndex = session.currentQuestionIndex as number;
+  const current = currentQuestionIndex >= 0 ? questions[currentQuestionIndex] : null;
 
   // Story 7.1: resume the live question on reconnect — don't drop the
   // player back to "waiting" mid-question just because their connection did.
@@ -47,45 +64,43 @@ export default async function PlayPage({
   let initialLocked = false;
   let initialMyChoices: number[] = [];
   let initialRevealedAnswers: string[] | null = null;
-  if (gameSession.status === "ACTIVE" && current) {
+  if (session.status === "ACTIVE" && current) {
     initialQuestion = toPublicQuestion(current);
     initialLocked = Boolean(current.lockedAt);
     initialRevealedAnswers = initialLocked ? current.correctChoices : null;
-    const myAnswer = await db.answer.findUnique({
-      where: { gameSessionQuestionId_playerId: { gameSessionQuestionId: current.id, playerId } },
-      select: { choiceIndices: true },
-    });
-    initialMyChoices = myAnswer?.choiceIndices ?? [];
+    const myAnswerSnap = await current.ref.collection("answers").doc(playerId).get();
+    initialMyChoices = (myAnswerSnap.data()?.choiceIndices as number[] | undefined) ?? [];
   }
 
   const initialPodium: LeaderboardEntry[] | null =
-    gameSession.status === "COMPLETED"
-      ? gameSession.results.map((result) => ({
-          playerId: result.playerId,
-          nickname: result.nickname,
-          points: result.totalPoints,
-          rank: result.rank,
-        }))
+    session.status === "COMPLETED"
+      ? resultsSnap.docs.map((doc) => {
+          const result = doc.data();
+          return {
+            playerId: doc.id,
+            nickname: result.nickname as string,
+            points: result.totalPoints as number,
+            rank: result.rank as number,
+          };
+        })
       : null;
   const initialTotalPlayers =
-    gameSession.status === "COMPLETED"
-      ? await db.sessionResult.count({ where: { gameSessionId: gameSession.id } })
-      : 0;
+    session.status === "COMPLETED" ? (await sessionRef.collection("results").count().get()).data().count : 0;
 
   return (
     <PlayerLobby
       pin={pin}
       playerId={playerId}
       nickname={nickname}
-      initialGameStarted={gameSession.status === "ACTIVE"}
+      initialGameStarted={session.status === "ACTIVE"}
       initialPodium={initialPodium}
       initialTotalPlayers={initialTotalPlayers}
       initialQuestion={initialQuestion}
       initialLocked={initialLocked}
       initialMyChoices={initialMyChoices}
       initialRevealedAnswers={initialRevealedAnswers}
-      initialShowLeaderboard={gameSession.showLeaderboard}
-      initialShowTimer={gameSession.showTimer}
+      initialShowLeaderboard={session.showLeaderboard as boolean}
+      initialShowTimer={session.showTimer as boolean}
     />
   );
 }
